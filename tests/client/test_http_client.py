@@ -168,7 +168,7 @@ async def test_logout_clears_state():
     state = AppState(
         token="tok",
         current_user=UserDTO(id=1, username="alice", email="a@b.com"),
-        active_room=RoomDTO(id=1, name="general", owner_username="alice", member_count=1, is_private=False, allow_member_invite=False, read_only=False),
+        active_room=RoomDTO(id=1, name="general", room_type="group", owner_username="alice", member_count=1, is_private=False, allow_member_invite=False, read_only=False),
     )
     client = APIClient(base_url="http://localhost:8000", state=state)
     await client.logout()

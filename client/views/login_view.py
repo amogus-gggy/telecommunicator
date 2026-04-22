@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import flet
+import httpx
 
 from client.api.http_client import APIClient, AuthError
 from client.config import API_URL
+from client.locale import t
 from client.state import AppState, UserDTO
 
 
@@ -11,10 +13,10 @@ def login_view(page: flet.Page, state: AppState) -> None:
     page.bgcolor = "#f0f2f5"
 
     username_field = flet.TextField(
-        label="Username", autofocus=True, bgcolor="#ffffff", border_color="#e0e0e0", color="#111b21",
+        label=t("login.username"), autofocus=True, bgcolor="#ffffff", border_color="#e0e0e0", color="#111b21",
     )
     password_field = flet.TextField(
-        label="Password",
+        label=t("login.password"),
         password=True,
         can_reveal_password=True,
         bgcolor="#ffffff",
@@ -23,7 +25,7 @@ def login_view(page: flet.Page, state: AppState) -> None:
     )
     error_text = flet.Text("", color="#ea4335", visible=False, size=13)
     submit_btn = flet.ElevatedButton(
-        "Login",
+        t("login.submit"),
         width=300,
         style=flet.ButtonStyle(
             bgcolor="#008069",
@@ -53,17 +55,22 @@ def login_view(page: flet.Page, state: AppState) -> None:
                 email=me["email"],
                 display_name=me.get("display_name"),
             )
-            from client.views.room_list_view import room_list_view
-
-            room_list_view(page, state)
+            from client.views.chat_list_view import chat_list_view
+            chat_list_view(page, state)
         except AuthError:
-            error_text.value = "Invalid username or password"
+            error_text.value = t("login.error_invalid")
+            error_text.visible = True
+            submit_btn.disabled = False
+            loading.visible = False
+            page.update()
+        except (httpx.ConnectError, httpx.TimeoutException):
+            error_text.value = t("login.error_connect")
             error_text.visible = True
             submit_btn.disabled = False
             loading.visible = False
             page.update()
         except Exception as exc:
-            error_text.value = f"Server error: {exc}"
+            error_text.value = t("login.error_server", exc=exc) if str(exc) else t("login.error_unknown")
             error_text.visible = True
             submit_btn.disabled = False
             loading.visible = False
@@ -76,7 +83,6 @@ def login_view(page: flet.Page, state: AppState) -> None:
 
     def go_register(e: flet.ControlEvent) -> None:
         from client.views.register_view import register_view
-
         register_view(page, state)
 
     async def do_logout(e: flet.ControlEvent) -> None:
@@ -86,7 +92,7 @@ def login_view(page: flet.Page, state: AppState) -> None:
         login_view(page, state)
 
     logout_btn = flet.TextButton(
-        "Logout",
+        t("login.logout"),
         on_click=do_logout,
         visible=state.token is not None,
         style=flet.ButtonStyle(color="#008069"),
@@ -101,23 +107,15 @@ def login_view(page: flet.Page, state: AppState) -> None:
                     content=flet.Container(
                         content=flet.Column(
                             controls=[
-                                flet.Icon(
-                                    flet.Icons.CHAT, size=56, color="#008069"
-                                ),
+                                flet.Icon(flet.Icons.CHAT, size=56, color="#008069"),
                                 flet.Text(
                                     "Telecommunicator",
                                     size=28,
                                     weight=flet.FontWeight.BOLD,
                                     color="#111b21",
                                 ),
-                                flet.Text(
-                                    "Sign in to your account",
-                                    size=14,
-                                    color="#667781",
-                                ),
-                                flet.Divider(
-                                    height=20, color=flet.Colors.TRANSPARENT
-                                ),
+                                flet.Text(t("login.subtitle"), size=14, color="#667781"),
+                                flet.Divider(height=20, color=flet.Colors.TRANSPARENT),
                                 username_field,
                                 password_field,
                                 error_text,
@@ -127,7 +125,7 @@ def login_view(page: flet.Page, state: AppState) -> None:
                                     vertical_alignment=flet.CrossAxisAlignment.CENTER,
                                 ),
                                 flet.TextButton(
-                                    "Don't have an account? Register",
+                                    t("login.no_account"),
                                     on_click=go_register,
                                     style=flet.ButtonStyle(color="#008069"),
                                 ),
