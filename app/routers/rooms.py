@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.deps import get_current_user
 from app.db.deps import get_db
 from app.models.user import User
-from app.schemas.rooms import PermissionUpdate, RoomCreate, RoomResponse
+from app.schemas.rooms import PermissionUpdate, RoomCreate, RoomResponse, PersonalChatRequest
 from app.services import room_service
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
@@ -25,6 +25,23 @@ async def list_rooms(
     db: AsyncSession = Depends(get_db),
 ) -> list[RoomResponse]:
     return await room_service.list_public_rooms(db)
+
+
+@router.get("/my", response_model=list[RoomResponse])
+async def get_my_chats(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[RoomResponse]:
+    return await room_service.get_user_chats(current_user, db)
+
+
+@router.post("/personal", response_model=RoomResponse, status_code=201)
+async def create_personal_chat(
+    data: PersonalChatRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RoomResponse:
+    return await room_service.create_personal_chat(data.username, current_user, db)
 
 
 @router.post("/{room_id}/join", response_model=RoomResponse)

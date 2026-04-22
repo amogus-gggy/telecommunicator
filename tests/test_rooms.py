@@ -221,3 +221,149 @@ async def test_owner_can_update_permissions_200(client: AsyncClient):
     data = resp.json()
     assert data["read_only"] is True
     assert data["allow_member_invite"] is True
+
+
+# ---------------------------------------------------------------------------
+# Public group toggle tests (Requirement 2)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_create_group_with_public_true_sets_room_type_public(client: AsyncClient):
+    token = await register_and_login(client, "pub_user1", "pub1@example.com", "password123")
+    resp = await client.post("/rooms", json={"name": "public-group-1", "room_type": "public", "is_private": False}, headers=auth(token))
+    assert resp.status_code == 201
+    assert resp.json()["room_type"] == "public"
+
+
+@pytest.mark.asyncio
+async def test_create_group_with_public_false_sets_room_type_group(client: AsyncClient):
+    token = await register_and_login(client, "grp_user1", "grp1@example.com", "password123")
+    resp = await client.post("/rooms", json={"name": "private-group-1", "room_type": "group", "is_private": False}, headers=auth(token))
+    assert resp.status_code == 201
+    assert resp.json()["room_type"] == "group"
+
+
+@pytest.mark.asyncio
+async def test_public_room_appears_in_public_rooms_list(client: AsyncClient):
+    token = await register_and_login(client, "pub_user2", "pub2@example.com", "password123")
+    await client.post("/rooms", json={"name": "discoverable-room", "room_type": "public", "is_private": False}, headers=auth(token))
+    resp = await client.get("/rooms", headers=auth(token))
+    assert resp.status_code == 200
+    names = [r["name"] for r in resp.json()]
+    assert "discoverable-room" in names
+
+
+@pytest.mark.asyncio
+async def test_private_group_excluded_from_public_rooms_list(client: AsyncClient):
+    token = await register_and_login(client, "grp_user2", "grp2@example.com", "password123")
+    await client.post("/rooms", json={"name": "hidden-group", "room_type": "group", "is_private": False}, headers=auth(token))
+    resp = await client.get("/rooms", headers=auth(token))
+    assert resp.status_code == 200
+    names = [r["name"] for r in resp.json()]
+    assert "hidden-group" not in names
+
+
+# ---------------------------------------------------------------------------
+# First-time join notification tests (Requirement 4)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_join_group_sends_member_joined_notification(client: AsyncClient):
+    """User joining a group triggers member_joined notification to existing members."""
+    from unittest.mock import AsyncMock, patch
+
+    owner_token = await register_and_login(client, "notif_owner1", "no1@example.com", "password123")
+    joiner_token = await register_and_login(client, "notif_joiner1", "nj1@example.com", "password123")
+
+    create_resp = await client.post(
+        "/rooms", json={"name": "notif-group-1", "room_type": "group"}, headers=auth(owner_token)
+    )
+    room_id = create_resp.json()["id"]
+
+    with patch("app.services.room_service.ws_manager") as mock_manager:
+        mock_manager.send_to_user = AsyncMock()
+        resp = await client.post(f"/rooms/{room_id}/join", headers=auth(joiner_token))
+
+    assert resp.status_code == 200
+    mock_manager.send_to_user.assert_called_once()
+    call_args = mock_manager.send_to_user.call_args
+    payload = call_args[0][1]
+    assert payload["type"] == "member_joined"
+    assert payload["payload"]["username"] == "notif_joiner1"
+    assert payload["payload"]["room_name"] == "notif-group-1"
+    assert "joined_at" in payload["payload"]
+
+
+@pytest.mark.asyncio
+async def test_join_group_twice_sends_notification_only_once(client: AsyncClient):
+    """Joining a group a second time does not send another notification."""
+    from unittest.mock import AsyncMock, patch
+
+    owner_token = await register_and_login(client, "notif_owner2", "no2@example.com", "password123")
+    joiner_token = await register_and_login(client, "notif_joiner2", "nj2@example.com", "password123")
+
+    create_resp = await client.post(
+        "/rooms", json={"name": "notif-group-2", "room_type": "group"}, headers=auth(owner_token)
+    )
+    room_id = create_resp.json()["id"]
+
+    with patch("app.services.room_service.ws_manager") as mock_manager:
+        mock_manager.send_to_user = AsyncMock()
+        # First join
+        await client.post(f"/rooms/{room_id}/join", headers=auth(joiner_token))
+        first_call_count = mock_manager.send_to_user.call_count
+        # Second join (idempotent)
+        await client.post(f"/rooms/{room_id}/join", headers=auth(joiner_token))
+        second_call_count = mock_manager.send_to_user.call_count
+
+    assert first_call_count == 1
+    assert second_call_count == 1  # No additional notification on second join
+
+
+@pytest.mark.asyncio
+async def test_join_personal_chat_sends_no_notification(client: AsyncClient):
+    """Joining a personal chat does not trigger a member_joined notification."""
+    from unittest.mock import AsyncMock, patch
+
+    user1_token = await register_and_login(client, "notif_p1", "np1@example.com", "password123")
+    await register_and_login(client, "notif_p2", "np2@example.com", "password123")
+
+    with patch("app.services.room_service.ws_manager") as mock_manager:
+        mock_manager.send_to_user = AsyncMock()
+        resp = await client.post(
+            "/rooms/personal", json={"username": "notif_p2"}, headers=auth(user1_token)
+        )
+
+    assert resp.status_code == 201
+    # No member_joined notification for personal chats
+    for call in mock_manager.send_to_user.call_args_list:
+        payload = call[0][1]
+        assert payload.get("type") != "member_joined"
+
+
+@pytest.mark.asyncio
+async def test_member_joined_notification_payload_structure(client: AsyncClient):
+    """Notification payload includes username, room_name, and joined_at."""
+    from unittest.mock import AsyncMock, patch
+
+    owner_token = await register_and_login(client, "notif_owner3", "no3@example.com", "password123")
+    joiner_token = await register_and_login(client, "notif_joiner3", "nj3@example.com", "password123")
+
+    create_resp = await client.post(
+        "/rooms", json={"name": "notif-group-3", "room_type": "group"}, headers=auth(owner_token)
+    )
+    room_id = create_resp.json()["id"]
+
+    with patch("app.services.room_service.ws_manager") as mock_manager:
+        mock_manager.send_to_user = AsyncMock()
+        await client.post(f"/rooms/{room_id}/join", headers=auth(joiner_token))
+
+    mock_manager.send_to_user.assert_called_once()
+    payload = mock_manager.send_to_user.call_args[0][1]
+    assert payload["type"] == "member_joined"
+    inner = payload["payload"]
+    assert "username" in inner
+    assert "room_name" in inner
+    assert "joined_at" in inner
+    assert "room_id" in inner
+    assert inner["room_id"] == room_id
