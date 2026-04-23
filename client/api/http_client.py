@@ -4,8 +4,8 @@ from typing import Any
 
 import httpx
 
-from client.config import API_URL
-from client.state import AppState
+from config import API_URL
+from state import AppState
 
 
 class APIError(Exception):
@@ -139,8 +139,12 @@ class APIClient:
         r = await self._get("/rooms")
         return r.json()
 
-    async def create_room(self, name: str, is_private: bool = False) -> dict:
-        r = await self._post("/rooms", json={"name": name, "is_private": is_private})
+    async def create_room(self, name: str, room_type: str = "public", is_private: bool = False) -> dict:
+        r = await self._post("/rooms", json={"name": name, "room_type": room_type, "is_private": is_private})
+        return r.json()
+
+    async def create_personal_chat(self, username: str) -> dict:
+        r = await self._post("/rooms/personal", json={"username": username})
         return r.json()
 
     async def join_room(self, room_id: int) -> None:

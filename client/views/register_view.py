@@ -2,22 +2,23 @@ from __future__ import annotations
 
 import flet
 
-from client.api.http_client import APIClient, ConflictError, ValidationError
-from client.config import API_URL
-from client.state import AppState, UserDTO
+from api.http_client import APIClient, ConflictError, ValidationError
+from config import API_URL
+from localization import t
+from state import AppState, UserDTO
 
 
 def register_view(page: flet.Page, state: AppState) -> None:
     page.bgcolor = "#f0f2f5"
 
     username_field = flet.TextField(
-        label="Username", autofocus=True, bgcolor="#ffffff", border_color="#e0e0e0",color="#111b21",
+        label=t("register.username"), autofocus=True, bgcolor="#ffffff", border_color="#e0e0e0", color="#111b21",
     )
     email_field = flet.TextField(
-        label="Email", bgcolor="#ffffff", border_color="#e0e0e0",color="#111b21",
+        label=t("register.email"), bgcolor="#ffffff", border_color="#e0e0e0", color="#111b21",
     )
     password_field = flet.TextField(
-        label="Password",
+        label=t("register.password"),
         password=True,
         can_reveal_password=True,
         bgcolor="#ffffff",
@@ -31,7 +32,7 @@ def register_view(page: flet.Page, state: AppState) -> None:
     general_error = flet.Text("", color="#ea4335", visible=False)
 
     submit_btn = flet.ElevatedButton(
-        "Register",
+        t("register.submit"),
         width=300,
         style=flet.ButtonStyle(
             bgcolor="#008069",
@@ -43,9 +44,9 @@ def register_view(page: flet.Page, state: AppState) -> None:
     loading = flet.ProgressRing(visible=False, width=20, height=20, color="#008069")
 
     def _clear_errors() -> None:
-        for t in (username_error, email_error, password_error, general_error):
-            t.value = ""
-            t.visible = False
+        for txt in (username_error, email_error, password_error, general_error):
+            txt.value = ""
+            txt.visible = False
 
     async def do_register(e: flet.ControlEvent) -> None:
         _clear_errors()
@@ -72,9 +73,8 @@ def register_view(page: flet.Page, state: AppState) -> None:
                 email=me["email"],
                 display_name=me.get("display_name"),
             )
-            from client.views.room_list_view import room_list_view
-
-            room_list_view(page, state)
+            from views.chat_list_view import chat_list_view
+            chat_list_view(page, state)
         except ConflictError as exc:
             msg = exc.message.lower()
             if "username" in msg:
@@ -107,7 +107,7 @@ def register_view(page: flet.Page, state: AppState) -> None:
             loading.visible = False
             page.update()
         except Exception as exc:
-            general_error.value = f"Server error: {exc}"
+            general_error.value = t("register.error_server", exc=exc)
             general_error.visible = True
             submit_btn.disabled = False
             loading.visible = False
@@ -119,8 +119,7 @@ def register_view(page: flet.Page, state: AppState) -> None:
     password_field.on_submit = do_register
 
     def go_login(e: flet.ControlEvent) -> None:
-        from client.views.login_view import login_view
-
+        from views.login_view import login_view
         login_view(page, state)
 
     page.controls.clear()
@@ -132,23 +131,15 @@ def register_view(page: flet.Page, state: AppState) -> None:
                     content=flet.Container(
                         content=flet.Column(
                             controls=[
-                                flet.Icon(
-                                    flet.Icons.CHAT, size=56, color="#008069"
-                                ),
+                                flet.Icon(flet.Icons.CHAT, size=56, color="#008069"),
                                 flet.Text(
                                     "Telecommunicator",
                                     size=28,
                                     weight=flet.FontWeight.BOLD,
                                     color="#111b21",
                                 ),
-                                flet.Text(
-                                    "Create a new account",
-                                    size=14,
-                                    color="#667781",
-                                ),
-                                flet.Divider(
-                                    height=20, color=flet.Colors.TRANSPARENT
-                                ),
+                                flet.Text(t("register.subtitle"), size=14, color="#667781"),
+                                flet.Divider(height=20, color=flet.Colors.TRANSPARENT),
                                 username_field,
                                 username_error,
                                 email_field,
@@ -162,7 +153,7 @@ def register_view(page: flet.Page, state: AppState) -> None:
                                     vertical_alignment=flet.CrossAxisAlignment.CENTER,
                                 ),
                                 flet.TextButton(
-                                    "Already have an account? Login",
+                                    t("register.have_account"),
                                     on_click=go_login,
                                     style=flet.ButtonStyle(color="#008069"),
                                 ),
