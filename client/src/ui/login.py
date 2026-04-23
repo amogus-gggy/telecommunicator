@@ -1,5 +1,6 @@
 import flet as ft
 import assets.constants as cnst
+import shared
 
 class LoginUI(ft.Container):
     def __init__(self):
@@ -16,49 +17,18 @@ class LoginUI(ft.Container):
                     text_align=ft.TextAlign.CENTER,
                     color=cnst.COL_TEXT
                 ),
-                ft.TextField(
-                    hint_text="Username",
-                    autocorrect=False,
-                    border_radius=10,
-                    border_width=0,
-                    bgcolor=cnst.COL_TEXT_FIELD,
-                    color=cnst.COL_TEXT
-                ),
-                ft.TextField(
-                    hint_text="Password",
-                    autocorrect=False,
-                    password=True,
-                    can_reveal_password=True,
-                    border_radius=10,
-                    border_width=0,
-                    bgcolor=cnst.COL_TEXT_FIELD,
-                    color=cnst.COL_TEXT
-                ),
+                shared.AuthTextField(hint_text="Username"),
+                shared.AuthPasswordField(),
                 ft.Container(height=10, bgcolor="#00000000", width=0),
                 ft.Row(
-                    controls=[
+                    controls=[ # pyright: ignore[reportArgumentType]
                         ft.Text(
                             "Need an account? ",
                             color=cnst.COL_TEXT
                         ),
-                        ft.GestureDetector(
-                            mouse_cursor=ft.MouseCursor.CLICK,
-                            content=ft.Text(
-                                "Register Now!",
-                                color=ft.Colors.BLUE,
-                                style=ft.TextStyle(
-                                    decoration=ft.TextDecoration.UNDERLINE,
-                                    decoration_color=ft.Colors.BLUE
-                                )
-                            )
-                        ),
+                        shared.HyperlinkButton("Register Now!"),
                         ft.VerticalDivider(40, color="#00000000"),
-                        ft.Button(
-                            content="Log in!",
-                            color=cnst.COL_BUTTON_TEXT,
-                            bgcolor=cnst.COL_BUTTON,
-                            disabled=True
-                        )
+                        shared.AuthButton("Login!")
                     ],
                     tight=True,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
