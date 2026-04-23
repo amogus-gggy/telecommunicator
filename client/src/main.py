@@ -1,4 +1,4 @@
 import flet as ft
-from ui.login import main
+from ui.register import main
 
 ft.run(main)
