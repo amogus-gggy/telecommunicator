@@ -56,7 +56,8 @@ class LoginUI(ft.Container):
                         ft.Button(
                             content="Log in!",
                             color=cnst.COL_BUTTON_TEXT,
-                            bgcolor=cnst.COL_BUTTON
+                            bgcolor=cnst.COL_BUTTON,
+                            disabled=True
                         )
                     ],
                     tight=True,
