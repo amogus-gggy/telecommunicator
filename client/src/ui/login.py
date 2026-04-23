@@ -22,6 +22,7 @@ class LoginUI(ft.Container):
                     border_radius=10,
                     border_width=0,
                     bgcolor=cnst.COL_TEXT_FIELD,
+                    color=cnst.COL_TEXT
                 ),
                 ft.TextField(
                     hint_text="Password",
@@ -31,11 +32,36 @@ class LoginUI(ft.Container):
                     border_radius=10,
                     border_width=0,
                     bgcolor=cnst.COL_TEXT_FIELD,
+                    color=cnst.COL_TEXT
                 ),
-                ft.Button(
-                    content="Log in!",
-                    color=cnst.COL_BUTTON_TEXT,
-                    bgcolor=cnst.COL_BUTTON
+                ft.Container(height=10, bgcolor="#00000000", width=0),
+                ft.Row(
+                    controls=[
+                        ft.Text(
+                            "Need an account? ",
+                            color=cnst.COL_TEXT
+                        ),
+                        ft.GestureDetector(
+                            mouse_cursor=ft.MouseCursor.CLICK,
+                            content=ft.Text(
+                                "Register Now!",
+                                color=ft.Colors.BLUE,
+                                style=ft.TextStyle(
+                                    decoration=ft.TextDecoration.UNDERLINE,
+                                    decoration_color=ft.Colors.BLUE
+                                )
+                            )
+                        ),
+                        ft.VerticalDivider(40, color="#00000000"),
+                        ft.Button(
+                            content="Log in!",
+                            color=cnst.COL_BUTTON_TEXT,
+                            bgcolor=cnst.COL_BUTTON
+                        )
+                    ],
+                    tight=True,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=0
                 )
             ],
             tight=True,
