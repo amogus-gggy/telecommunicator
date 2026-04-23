@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import flet
 
-from client.locale import set_locale
+from client.localization import set_locale
 from client.state import AppState
 from client.storage.settings import LocalStorage
 

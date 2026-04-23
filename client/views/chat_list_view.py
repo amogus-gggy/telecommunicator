@@ -6,7 +6,7 @@ from client.api.http_client import APIClient
 from client.api.ws_client import NotificationClient
 from client.cache.cache_manager import CacheManager
 from client.config import API_URL
-from client.locale import t
+from client.localization import t
 from client.state import AppState, RoomDTO
 
 

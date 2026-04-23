@@ -4,7 +4,7 @@ import flet
 
 from client.api.http_client import APIClient, AuthError, ValidationError
 from client.config import API_URL
-from client.locale import t, set_locale, get_locale, AVAILABLE_LOCALES
+from client.localization import t, set_locale, get_locale, AVAILABLE_LOCALES
 from client.state import AppState
 
 

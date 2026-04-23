@@ -5,7 +5,7 @@ import flet
 from client.api.http_client import APIClient, AuthError
 from client.api.ws_client import WsClient
 from client.config import API_URL
-from client.locale import t
+from client.localization import t
 from client.state import AppState
 
 

@@ -5,7 +5,7 @@ import httpx
 
 from client.api.http_client import APIClient, AuthError
 from client.config import API_URL
-from client.locale import t
+from client.localization import t
 from client.state import AppState, UserDTO
 
 
