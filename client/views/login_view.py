@@ -3,10 +3,10 @@ from __future__ import annotations
 import flet
 import httpx
 
-from client.api.http_client import APIClient, AuthError
-from client.config import API_URL
-from client.localization import t
-from client.state import AppState, UserDTO
+from api.http_client import APIClient, AuthError
+from config import API_URL
+from localization import t
+from state import AppState, UserDTO
 
 
 def login_view(page: flet.Page, state: AppState) -> None:
@@ -55,7 +55,7 @@ def login_view(page: flet.Page, state: AppState) -> None:
                 email=me["email"],
                 display_name=me.get("display_name"),
             )
-            from client.views.chat_list_view import chat_list_view
+            from views.chat_list_view import chat_list_view
             chat_list_view(page, state)
         except AuthError:
             error_text.value = t("login.error_invalid")
@@ -82,7 +82,7 @@ def login_view(page: flet.Page, state: AppState) -> None:
     password_field.on_submit = do_login
 
     def go_register(e: flet.ControlEvent) -> None:
-        from client.views.register_view import register_view
+        from views.register_view import register_view
         register_view(page, state)
 
     async def do_logout(e: flet.ControlEvent) -> None:

@@ -1,19 +1,14 @@
 from __future__ import annotations
 
-import sys
 import os
-
-# Ensure the project root is on sys.path so `client.*` imports work
-# regardless of how this file is launched (e.g. `flet run client/main.py`)
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import logging
 
 import flet
 
-from client.localization import set_locale
-from client.state import AppState
-from client.storage.settings import LocalStorage
+from localization import set_locale
+from state import AppState
+from storage.settings import LocalStorage
 
-import logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -51,7 +46,7 @@ async def main(page: flet.Page) -> None:
         state.message_alignment = stored_alignment
         logger.info("[main] Applied stored alignment: %r", stored_alignment)
 
-    from client.views.login_view import login_view
+    from views.login_view import login_view
     login_view(page, state)
 
 

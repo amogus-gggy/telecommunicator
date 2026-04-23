@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import flet
 
-from client.api.http_client import APIClient, ConflictError, ValidationError
-from client.config import API_URL
-from client.localization import t
-from client.state import AppState, UserDTO
+from api.http_client import APIClient, ConflictError, ValidationError
+from config import API_URL
+from localization import t
+from state import AppState, UserDTO
 
 
 def register_view(page: flet.Page, state: AppState) -> None:
@@ -73,7 +73,7 @@ def register_view(page: flet.Page, state: AppState) -> None:
                 email=me["email"],
                 display_name=me.get("display_name"),
             )
-            from client.views.chat_list_view import chat_list_view
+            from views.chat_list_view import chat_list_view
             chat_list_view(page, state)
         except ConflictError as exc:
             msg = exc.message.lower()
@@ -119,7 +119,7 @@ def register_view(page: flet.Page, state: AppState) -> None:
     password_field.on_submit = do_register
 
     def go_login(e: flet.ControlEvent) -> None:
-        from client.views.login_view import login_view
+        from views.login_view import login_view
         login_view(page, state)
 
     page.controls.clear()

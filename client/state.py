@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
-    from client.api.ws_client import WsClient, NotificationClient
+    from api.ws_client import WsClient, NotificationClient
 
 
 @dataclass

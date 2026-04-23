@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import flet
 
-from client.api.http_client import APIClient, AuthError
-from client.api.ws_client import WsClient
-from client.config import API_URL
-from client.localization import t
-from client.state import AppState
+from api.http_client import APIClient, AuthError
+from api.ws_client import WsClient
+from config import API_URL
+from localization import t
+from state import AppState
 
 
 def room_view(page: flet.Page, state: AppState) -> None:
@@ -312,7 +312,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 flet.Text(t("room.session_expired"), color="#ffffff"), open=True, bgcolor="#ea4335"
             )
             page.update()
-            from client.views.login_view import login_view
+            from views.login_view import login_view
 
             login_view(page, state)
             return []
@@ -452,12 +452,12 @@ def room_view(page: flet.Page, state: AppState) -> None:
         state.on_alignment_change = None
         _state["ws_client"] = None
         state.active_room = None
-        from client.views.chat_list_view import chat_list_view
+        from views.chat_list_view import chat_list_view
 
         chat_list_view(page, state)
 
     def _go_settings(e: flet.ControlEvent) -> None:
-        from client.views.room_settings_view import room_settings_view
+        from views.room_settings_view import room_settings_view
 
         room_settings_view(page, state)
 

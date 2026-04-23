@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import flet
 
-from client.api.http_client import APIClient
-from client.api.ws_client import NotificationClient
-from client.config import API_URL
-from client.localization import t
-from client.state import AppState, RoomDTO
+from api.http_client import APIClient
+from api.ws_client import NotificationClient
+from config import API_URL
+from localization import t
+from state import AppState, RoomDTO
 
 
 def room_list_view(page: flet.Page, state: AppState) -> None:
@@ -41,7 +41,7 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
             create_dialog.open = False
             page.update()
             _stop_refresh()
-            from client.views.room_view import room_view
+            from views.room_view import room_view
             room_view(page, state)
         except Exception as exc:
             create_error.value = str(exc)
@@ -87,7 +87,7 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
                 await client.join_room(r["id"])
                 state.active_room = RoomDTO(**{k: r[k] for k in RoomDTO.__dataclass_fields__})
                 _stop_refresh()
-                from client.views.room_view import room_view
+                from views.room_view import room_view
                 room_view(page, state)
             except Exception as exc:
                 page.snack_bar = flet.SnackBar(flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335")
@@ -98,7 +98,7 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
         async def on_open(e: flet.ControlEvent, r: dict = room) -> None:
             state.active_room = RoomDTO(**{k: r[k] for k in RoomDTO.__dataclass_fields__})
             _stop_refresh()
-            from client.views.room_view import room_view
+            from views.room_view import room_view
             room_view(page, state)
 
         action_btn = (
@@ -197,7 +197,7 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
         client = APIClient(base_url=API_URL, state=state)
         await client.logout()
         await client.aclose()
-        from client.views.login_view import login_view
+        from views.login_view import login_view
         login_view(page, state)
 
     _active = {"running": True}
@@ -235,7 +235,7 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
 
     def _go_profile(e: flet.ControlEvent) -> None:
         _stop_refresh()
-        from client.views.profile_view import profile_view
+        from views.profile_view import profile_view
         profile_view(page, state)
 
     top_bar = flet.Container(

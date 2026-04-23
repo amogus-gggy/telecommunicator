@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import flet
 
-from client.api.http_client import APIClient
-from client.api.ws_client import NotificationClient
-from client.cache.cache_manager import CacheManager
-from client.config import API_URL
-from client.localization import t
-from client.state import AppState, RoomDTO
+from api.http_client import APIClient
+from api.ws_client import NotificationClient
+from cache.cache_manager import CacheManager
+from config import API_URL
+from localization import t
+from state import AppState, RoomDTO
 
 
 def chat_list_view(page: flet.Page, state: AppState) -> None:
@@ -71,7 +71,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             personal_dialog.open = False
             page.update()
             _stop_refresh()
-            from client.views.room_view import room_view
+            from views.room_view import room_view
             room_view(page, state)
         except Exception as exc:
             personal_error.value = str(exc)
@@ -109,7 +109,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             group_dialog.open = False
             page.update()
             _stop_refresh()
-            from client.views.room_view import room_view
+            from views.room_view import room_view
             room_view(page, state)
         except Exception as exc:
             group_error.value = str(exc)
@@ -214,7 +214,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
         async def on_open(e: flet.ControlEvent, r: dict = room) -> None:
             state.active_room = RoomDTO(**{k: r[k] for k in RoomDTO.__dataclass_fields__})
             _stop_refresh()
-            from client.views.room_view import room_view
+            from views.room_view import room_view
             room_view(page, state)
 
         subtitle_parts = []
@@ -338,12 +338,12 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
         client = APIClient(base_url=API_URL, state=state)
         await client.logout()
         await client.aclose()
-        from client.views.login_view import login_view
+        from views.login_view import login_view
         login_view(page, state)
 
     def _go_profile(e: flet.ControlEvent) -> None:
         _stop_refresh()
-        from client.views.profile_view import profile_view
+        from views.profile_view import profile_view
         profile_view(page, state)
 
     _active = {"running": True}
