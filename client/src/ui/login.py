@@ -10,7 +10,7 @@ class LoginUI(ft.Container):
         self.content = ft.Column(
             controls=[ # pyright: ignore[reportArgumentType]
                 ft.Text(
-                    value="AppName",
+                    value="Telecommunicator",
                     size=44,
                     weight=ft.FontWeight.W_500,
                     text_align=ft.TextAlign.CENTER,
