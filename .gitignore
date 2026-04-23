@@ -11,6 +11,7 @@ client/env/
 venv
 .idea
 .vs
+.vscode
 __pycache__
 .pytest_cache
 messenger.db
