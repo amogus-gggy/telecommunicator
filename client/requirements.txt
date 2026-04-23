@@ -1,5 +1,0 @@
-flet
-httpx
-websockets
-flet-secure-storage>=0.1.0
-python-i18n[YAML]>=0.3.9

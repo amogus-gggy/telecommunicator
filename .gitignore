@@ -1,7 +1,16 @@
+client/build/
+client/dist/
+client/__pycache__/
+client/*.spec
+client/storage/
+client/.venv/
+client/env/
+
 .kiro
 .venv
+venv
+.idea
 .vs
 __pycache__
 .pytest_cache
 messenger.db
-client/build
