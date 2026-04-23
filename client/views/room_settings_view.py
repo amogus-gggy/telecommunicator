@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import flet
 
-from client.api.http_client import APIClient, ForbiddenError
-from client.config import API_URL
-from client.localization import t
-from client.state import AppState
+from api.http_client import APIClient, ForbiddenError
+from config import API_URL
+from localization import t
+from state import AppState
 
 
 def room_settings_view(page: flet.Page, state: AppState) -> None:
@@ -13,7 +13,7 @@ def room_settings_view(page: flet.Page, state: AppState) -> None:
     room = state.active_room
 
     def _go_back(e: flet.ControlEvent | None = None) -> None:
-        from client.views.room_view import room_view
+        from views.room_view import room_view
         room_view(page, state)
 
     if (

@@ -5,8 +5,16 @@ description = "A Python messenger client"
 version = "1.0.0"
 
 [tool.flet.app]
-module = "client.main"
+module = "main"
 assets_dir = "assets"
+
+[tool.flet.android]
+permissions = [
+    "android.permission.INTERNET",
+    "android.permission.ACCESS_NETWORK_STATE",
+]
+adaptive_icon_background = "#2196F3"
+adaptive_icon_foreground = "assets/images/icon.png"
 
 [build-system]
 requires = ["flet[build]>=0.84.0"]

@@ -1,7 +1,7 @@
 """Localization module for the Telecommunicator client.
 
 Usage:
-    from client.i18n import t, set_locale
+    from i18n import t, set_locale
 
     set_locale("ru")
     t("login.submit")          # -> "Войти"
@@ -17,10 +17,10 @@ _LOCALES_DIR = os.path.join(os.path.dirname(__file__), "locales")
 i18n.set("load_path", [_LOCALES_DIR])
 i18n.set("file_format", "yml")
 i18n.set("filename_format", "{locale}.{format}")
-i18n.set("fallback", "ru")
+i18n.set("fallback", "en")
 i18n.set("error_on_missing_translation", False)
 
-_current_locale: str = "ru"
+_current_locale: str = "en"
 
 
 def set_locale(locale: str) -> None:

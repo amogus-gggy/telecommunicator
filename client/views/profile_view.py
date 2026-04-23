@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import flet
 
-from client.api.http_client import APIClient, AuthError, ValidationError
-from client.config import API_URL
-from client.localization import t, set_locale, get_locale, AVAILABLE_LOCALES
-from client.state import AppState
+from api.http_client import APIClient, AuthError, ValidationError
+from config import API_URL
+from localization import t, set_locale, get_locale, AVAILABLE_LOCALES
+from state import AppState
 
 
 def profile_view(page: flet.Page, state: AppState) -> None:
@@ -56,7 +56,7 @@ def profile_view(page: flet.Page, state: AppState) -> None:
                 open=True, bgcolor="#ea4335",
             )
             page.update()
-            from client.views.login_view import login_view
+            from views.login_view import login_view
             login_view(page, state)
         except Exception as exc:
             page.snack_bar = flet.SnackBar(flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335")
@@ -113,7 +113,7 @@ def profile_view(page: flet.Page, state: AppState) -> None:
             await client.aclose()
 
     def _go_back(e: flet.ControlEvent) -> None:
-        from client.views.chat_list_view import chat_list_view
+        from views.chat_list_view import chat_list_view
         chat_list_view(page, state)
 
     # --- Language setting ---
