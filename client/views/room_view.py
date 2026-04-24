@@ -22,6 +22,10 @@ def room_view(page: flet.Page, state: AppState) -> None:
         auto_scroll=False,
     )
 
+    async def pick_file(e):
+        files = await flet.FilePicker().pick_files(allow_multiple=True)
+        print(files)
+
     message_input = flet.TextField(
         label=t("room.message_hint"),
         expand=True,
@@ -58,6 +62,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         ),
         open=False,
     )
+
     page.overlay.append(_profile_sheet)
 
     async def _show_user_profile(username: str) -> None:
@@ -612,6 +617,12 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 flet.Container(
                     content=flet.Row(
                         controls=[
+                            flet.IconButton(
+                                icon=flet.Icons.ATTACH_FILE,
+                                on_click=pick_file,
+                                icon_color="#008069",
+                                tooltip="Attach file",
+                            ),
                             message_input,
                             flet.IconButton(
                                 icon=flet.Icons.SEND,
