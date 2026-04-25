@@ -7,20 +7,27 @@ from api.ws_client import WsClient
 from config import API_URL
 from localization import t
 from state import AppState
+from views.widgets.markdown_viewer import MarkdownViewer, resolve_shortcodes
+from views.widgets.formatting_toolbar import FormattingToolbar
+from views.widgets.emoji_picker import EmojiPicker
 
 
 def room_view(page: flet.Page, state: AppState) -> None:
     room = state.active_room
+    print(f"[room_view] entered, room={room}")
     if room is None:
+        print(f"[room_view] room is None, returning early")
         return
 
     page.bgcolor = "#efeae2"
+    print(f"[room_view] creating widgets...")
 
     messages_list = flet.ListView(
         expand=True,
         spacing=6,
         auto_scroll=False,
     )
+    print(f"[room_view] messages_list ok")
 
     message_input = flet.TextField(
         label=t("room.message_hint"),
@@ -32,6 +39,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         border_color=flet.Colors.TRANSPARENT,
         color=flet.Colors.BLACK
     )
+    print(f"[room_view] message_input ok")
 
     reconnecting_banner = flet.Container(
         content=flet.Text(
@@ -46,6 +54,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         border_radius=4,
         alignment=flet.alignment.Alignment(0, 0),
     )
+    print(f"[room_view] reconnecting_banner ok")
 
     _state: dict = {"min_id": None, "loading_older": False, "ws_client": None, "user_at_bottom": True, "messages_data": []}
 
@@ -59,6 +68,39 @@ def room_view(page: flet.Page, state: AppState) -> None:
         open=False,
     )
     page.overlay.append(_profile_sheet)
+    print(f"[room_view] profile_sheet ok")
+
+    # Emoji picker callbacks
+    def _on_emoji_selected(emoji_char: str) -> None:
+        """Insert emoji at cursor position or at end of message."""
+        current_value = message_input.value or ""
+        
+        # TextField doesn't expose cursor_position, so just append to end
+        new_value = current_value + emoji_char
+        message_input.value = new_value
+        page.update()
+
+    def _on_emoji_picker_close() -> None:
+        """Hide the emoji picker."""
+        emoji_picker.close()
+        page.update()
+
+    # Create emoji picker
+    print(f"[room_view] creating EmojiPicker...")
+    emoji_picker = EmojiPicker(
+        on_emoji_selected=_on_emoji_selected,
+        on_close=_on_emoji_picker_close,
+    )
+    page.overlay.append(emoji_picker)
+    print(f"[room_view] EmojiPicker ok")
+
+    def _toggle_emoji_picker(e: flet.ControlEvent) -> None:
+        """Toggle emoji picker visibility."""
+        if emoji_picker.visible:
+            emoji_picker.close()
+        else:
+            emoji_picker.open()
+        page.update()
 
     async def _show_user_profile(username: str) -> None:
         _profile_sheet_content.controls.clear()
@@ -185,12 +227,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     )
                     if not is_me
                     else flet.Container(),
-                    flet.Text(
-                        body,
-                        size=14,
-                        color="#111b21",
-                        selectable=True,
-                    ),
+                    MarkdownViewer(value=body),
                     flet.Row(
                         controls=[
                             flet.Text(ts, size=10, color="#667781"),
@@ -274,27 +311,55 @@ def room_view(page: flet.Page, state: AppState) -> None:
             msg = payload.get("payload", payload)
             print(f"[WS] Processing message: {msg.get('id', 'no-id')} from {msg.get('author_username', 'unknown')}")
             
-            user_at_bottom = _is_user_at_bottom()
-            print(f"[WS] User at bottom: {user_at_bottom}")
-
-            _state["messages_data"].append(msg)
-            message_control = _build_message_tile(msg)
-            messages_list.controls.append(message_control)
-            print(f"[WS] Added message to list, total messages: {len(messages_list.controls)}")
+            # Check if this is our own message (optimistic update already shown)
+            is_own_message = (
+                state.current_user is not None
+                and msg.get("author_username") == state.current_user.username
+            )
             
-            reconnecting_banner.visible = False
-            _animate_message(message_control)
-            print(f"[WS] Animated message")
+            # Check if we already have this message (by temporary ID or real ID)
+            msg_id = msg.get("id")
+            temp_id = msg.get("temp_id")
+            already_exists = False
+            
+            if is_own_message:
+                # Look for temporary message with matching temp_id or body
+                for i, existing_msg in enumerate(_state["messages_data"]):
+                    if existing_msg.get("temp_id") == temp_id or (
+                        existing_msg.get("is_optimistic") and 
+                        existing_msg.get("body") == msg.get("body")
+                    ):
+                        # Replace optimistic message with real one
+                        _state["messages_data"][i] = msg
+                        messages_list.controls[i] = _build_message_tile(msg)
+                        already_exists = True
+                        print(f"[WS] Replaced optimistic message with real one")
+                        break
+            
+            if not already_exists:
+                user_at_bottom = _is_user_at_bottom()
+                print(f"[WS] User at bottom: {user_at_bottom}")
+
+                _state["messages_data"].append(msg)
+                message_control = _build_message_tile(msg)
+                messages_list.controls.append(message_control)
+                print(f"[WS] Added message to list, total messages: {len(messages_list.controls)}")
+                
+                reconnecting_banner.visible = False
+                _animate_message(message_control)
+                print(f"[WS] Animated message")
             
             page.update()
             print(f"[WS] Updated page")
             
             # Only scroll to bottom if user was already at bottom
-            if user_at_bottom:
-                print(f"[WS] Scrolling to bottom...")
-                page.run_task(_smooth_scroll_to_bottom)
-            else:
-                print(f"[WS] Not scrolling - user not at bottom")
+            if not already_exists:
+                user_at_bottom = _is_user_at_bottom()
+                if user_at_bottom:
+                    print(f"[WS] Scrolling to bottom...")
+                    page.run_task(_smooth_scroll_to_bottom)
+                else:
+                    print(f"[WS] Not scrolling - user not at bottom")
 
     def _on_reconnecting(delay: float) -> None:
         reconnecting_banner.visible = True
@@ -393,13 +458,40 @@ def room_view(page: flet.Page, state: AppState) -> None:
             print(f"[SEND] Setting user_at_bottom = True")
             _state["user_at_bottom"] = True
             
-            print(f"[SEND] Sending message via WebSocket...")
-            await ws.send_message(room.id, body)
+            # Resolve emoji shortcodes before sending
+            resolved_body = resolve_shortcodes(body)
             
+            # Create optimistic message for immediate display
+            import time
+            temp_id = f"temp_{int(time.time() * 1000)}"
+            optimistic_msg = {
+                "id": None,
+                "temp_id": temp_id,
+                "body": resolved_body,
+                "author_username": state.current_user.username if state.current_user else "?",
+                "author_display_name": state.current_user.display_name if state.current_user else None,
+                "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "is_optimistic": True,
+            }
+            
+            # Add optimistic message to UI immediately
+            _state["messages_data"].append(optimistic_msg)
+            message_control = _build_message_tile(optimistic_msg)
+            messages_list.controls.append(message_control)
+            _animate_message(message_control)
+            
+            # Clear input and update UI
             message_input.value = ""
-            print(f"[SEND] Cleared input field")
+            print(f"[SEND] Cleared input field and added optimistic message")
             page.update()
-            print(f"[SEND] Updated page")
+            
+            # Scroll to bottom
+            page.run_task(_smooth_scroll_to_bottom)
+            
+            # Send message via WebSocket
+            print(f"[SEND] Sending message via WebSocket...")
+            await ws.send_message(room.id, resolved_body)
+            print(f"[SEND] Message sent")
         except Exception as exc:
             print(f"[SEND] Error sending message: {exc}")
             page.snack_bar = flet.SnackBar(flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335")
@@ -597,7 +689,19 @@ def room_view(page: flet.Page, state: AppState) -> None:
         padding=flet.padding.symmetric(horizontal=8, vertical=8),
     )
 
+    # Create formatting toolbar
+    print(f"[room_view] creating FormattingToolbar...")
+    formatting_toolbar = FormattingToolbar(
+        get_value=lambda: message_input.value or "",
+        set_value=lambda v: setattr(message_input, 'value', v),  # No need for page.update()
+        get_cursor=lambda: None,  # Flet TextField doesn't expose cursor_position
+        text_field=message_input,  # Pass TextField reference for selection support
+        disabled=False,  # For now, use False since there's no read-only state
+    )
+    print(f"[room_view] FormattingToolbar ok")
+
     page.controls.clear()
+    print(f"[room_view] controls cleared, building UI...")
     page.add(
         flet.Column(
             controls=[
@@ -610,18 +714,32 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     padding=flet.padding.symmetric(horizontal=8, vertical=8),
                 ),
                 flet.Container(
-                    content=flet.Row(
+                    content=flet.Column(
                         controls=[
-                            message_input,
-                            flet.IconButton(
-                                icon=flet.Icons.SEND,
-                                on_click=lambda e: page.run_task(_send_message),
-                                icon_color="#008069",
-                                tooltip=t("room.send"),
-                                icon_size=24,
+                            formatting_toolbar,
+                            flet.Row(
+                                controls=[
+                                    flet.IconButton(
+                                        icon=flet.Icons.EMOJI_EMOTIONS,
+                                        on_click=_toggle_emoji_picker,
+                                        icon_color="#008069",
+                                        tooltip=t("room.emoji_picker"),
+                                        icon_size=24,
+                                    ),
+                                    message_input,
+                                    flet.IconButton(
+                                        icon=flet.Icons.SEND,
+                                        on_click=lambda e: page.run_task(_send_message),
+                                        icon_color="#008069",
+                                        tooltip=t("room.send"),
+                                        icon_size=24,
+                                    ),
+                                ],
+                                vertical_alignment=flet.CrossAxisAlignment.CENTER,
                             ),
                         ],
-                        vertical_alignment=flet.CrossAxisAlignment.CENTER,
+                        spacing=4,
+                        tight=True,
                     ),
                     bgcolor="#f0f2f5",
                     padding=flet.padding.symmetric(horizontal=12, vertical=8),
@@ -632,5 +750,6 @@ def room_view(page: flet.Page, state: AppState) -> None:
         )
     )
     page.update()
+    print(f"[room_view] page.update() done, starting tasks...")
     page.run_task(_initial_load)
     page.run_task(_start_ws)

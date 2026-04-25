@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import logging
+import sys
 
 import flet
 
@@ -16,6 +17,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 _SETTINGS_DIR_FALLBACK = os.path.join(os.path.dirname(__file__), "storage", "data")
+
+# needed for tests and sometimes android support
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 async def main(page: flet.Page) -> None:
@@ -48,6 +52,22 @@ async def main(page: flet.Page) -> None:
 
     from views.login_view import login_view
     login_view(page, state)
+
+
+async def _preload_views() -> None:
+    """Pre-import all view modules so lazy imports don't block on Android."""
+    print("[main] preloading view modules...")
+    import views.login_view  # noqa: F401
+    import views.register_view  # noqa: F401
+    import views.chat_list_view  # noqa: F401
+    import views.room_view  # noqa: F401
+    import views.profile_view  # noqa: F401
+    import views.room_settings_view  # noqa: F401
+    import views.room_list_view  # noqa: F401
+    import views.widgets.markdown_viewer  # noqa: F401
+    import views.widgets.emoji_picker  # noqa: F401
+    import views.widgets.formatting_toolbar  # noqa: F401
+    print("[main] preloading done")
 
 
 if __name__ == "__main__":
