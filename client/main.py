@@ -54,6 +54,22 @@ async def main(page: flet.Page) -> None:
     login_view(page, state)
 
 
+async def _preload_views() -> None:
+    """Pre-import all view modules so lazy imports don't block on Android."""
+    print("[main] preloading view modules...")
+    import views.login_view  # noqa: F401
+    import views.register_view  # noqa: F401
+    import views.chat_list_view  # noqa: F401
+    import views.room_view  # noqa: F401
+    import views.profile_view  # noqa: F401
+    import views.room_settings_view  # noqa: F401
+    import views.room_list_view  # noqa: F401
+    import views.widgets.markdown_viewer  # noqa: F401
+    import views.widgets.emoji_picker  # noqa: F401
+    import views.widgets.formatting_toolbar  # noqa: F401
+    print("[main] preloading done")
+
+
 if __name__ == "__main__":
     flet.app(
         target=main,

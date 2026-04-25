@@ -4,8 +4,8 @@ from typing import Any
 
 import httpx
 
-from client.config import API_URL
-from client.state import AppState
+from config import API_URL
+from state import AppState
 
 
 class APIError(Exception):

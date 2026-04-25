@@ -2,57 +2,176 @@ from __future__ import annotations
 
 from typing import Callable
 
-import emoji
 import flet as ft
 
-
-def _categorize(char: str) -> str:
-    """Assign a category to an emoji based on its Unicode code point range."""
-    cp = ord(char[0])
-    if 0x1F600 <= cp <= 0x1F64F:
-        return "Smileys & Emotion"
-    if 0x1F466 <= cp <= 0x1F46F or 0x1F9D0 <= cp <= 0x1F9FF or 0x1F91A <= cp <= 0x1F91F:
-        return "People & Body"
-    if 0x1F400 <= cp <= 0x1F43F or 0x1F980 <= cp <= 0x1F9AE:
-        return "Animals & Nature"
-    if 0x1F32D <= cp <= 0x1F37F or 0x1F950 <= cp <= 0x1F96F:
-        return "Food & Drink"
-    if 0x1F680 <= cp <= 0x1F6FF or 0x1F30D <= cp <= 0x1F32C:
-        return "Travel & Places"
-    if 0x1F3A0 <= cp <= 0x1F3FF or 0x1F4A0 <= cp <= 0x1F4FF:
-        return "Activities & Objects"
-    if 0x1F500 <= cp <= 0x1F5FF:
-        return "Symbols"
-    if 0x1F1E0 <= cp <= 0x1F1FF:
-        return "Flags"
-    return "Other"
-
-
-# Build catalogue at module import time
-EMOJI_CATALOGUE: dict[str, list[tuple[str, str]]] = {}
-for _char, _data in emoji.EMOJI_DATA.items():
-    # Only include fully-qualified emoji (status 2)
-    if _data.get("status", 0) != 2:
-        continue
-    
-    # Skip flags (Regional Indicator Symbols) - they often don't render correctly
-    # Flags are composed of two Regional Indicator characters (U+1F1E6 to U+1F1FF)
-    if len(_char) >= 2 and all(0x1F1E6 <= ord(c) <= 0x1F1FF for c in _char[:2]):
-        continue
-    
-    _group = _categorize(_char)
-    _name = _data.get("en", _char).strip(":")
-    EMOJI_CATALOGUE.setdefault(_group, []).append((_char, _name))
+# Compact built-in catalogue — no external dependency
+EMOJI_CATALOGUE: dict[str, list[tuple[str, str]]] = {
+    "Smileys": [
+        ("😀","grinning"),("😁","beaming"),("😂","joy"),("🤣","rofl"),("😃","smiley"),
+        ("😄","smile"),("😅","sweat_smile"),("😆","laughing"),("😉","wink"),("😊","blush"),
+        ("😋","yum"),("😎","sunglasses"),("😍","heart_eyes"),("🥰","smiling_hearts"),
+        ("😘","kissing_heart"),("😗","kissing"),("😙","kissing_smiling_eyes"),
+        ("🤩","star_struck"),("🥳","partying"),("😏","smirk"),("😒","unamused"),
+        ("😞","disappointed"),("😔","pensive"),("😟","worried"),("😕","confused"),
+        ("🙁","slightly_frowning"),("☹️","frowning"),("😣","persevere"),("😖","confounded"),
+        ("😫","tired"),("😩","weary"),("🥺","pleading"),("😢","cry"),("😭","sob"),
+        ("😤","triumph"),("😠","angry"),("😡","rage"),("🤬","cursing"),("😈","smiling_imp"),
+        ("👿","imp"),("💀","skull"),("☠️","skull_crossbones"),("😺","smiley_cat"),
+        ("😸","smile_cat"),("😹","joy_cat"),("😻","heart_eyes_cat"),("😼","smirk_cat"),
+        ("😽","kissing_cat"),("🙀","scream_cat"),("😿","crying_cat"),("😾","pouting_cat"),
+        ("🙈","see_no_evil"),("🙉","hear_no_evil"),("🙊","speak_no_evil"),
+        ("💋","kiss"),("💯","100"),("💢","anger"),("💥","boom"),("💫","dizzy"),
+        ("💦","sweat_drops"),("💨","dash"),("🕳️","hole"),("💬","speech_balloon"),
+        ("👋","wave"),("🤚","raised_back_of_hand"),("🖐️","hand"),("✋","raised_hand"),
+        ("🤙","call_me"),("👌","ok_hand"),("🤌","pinched_fingers"),("✌️","v"),
+        ("🤞","crossed_fingers"),("🤟","love_you"),("🤘","metal"),("👈","point_left"),
+        ("👉","point_right"),("👆","point_up"),("👇","point_down"),("☝️","point_up_2"),
+        ("👍","thumbsup"),("👎","thumbsdown"),("✊","fist"),("👊","oncoming_fist"),
+        ("🤛","left_fist"),("🤜","right_fist"),("👏","clap"),("🙌","raised_hands"),
+        ("🤲","palms_up"),("🤝","handshake"),("🙏","pray"),
+    ],
+    "People": [
+        ("👶","baby"),("🧒","child"),("👦","boy"),("👧","girl"),("🧑","person"),
+        ("👱","blond_person"),("👨","man"),("👩","woman"),("🧓","older_person"),
+        ("👴","older_man"),("👵","older_woman"),("🙍","person_frowning"),
+        ("🙎","person_pouting"),("🙅","no_good"),("🙆","ok_person"),("💁","information_desk_person"),
+        ("🙋","raising_hand"),("🧏","deaf_person"),("🙇","bow"),("🤦","facepalm"),
+        ("🤷","shrug"),("💆","massage"),("💇","haircut"),("🚶","walking"),("🧍","standing"),
+        ("🧎","kneeling"),("🏃","running"),("💃","dancer"),("🕺","man_dancing"),
+        ("👫","couple"),("👬","two_men"),("👭","two_women"),("👪","family"),
+        ("🧑‍💻","technologist"),("👮","police_officer"),("🧑‍⚕️","health_worker"),
+        ("🧑‍🏫","teacher"),("🧑‍🍳","cook"),("🧑‍🔧","mechanic"),("🧑‍🎤","singer"),
+        ("🧑‍🎨","artist"),("🧑‍✈️","pilot"),("🧑‍🚀","astronaut"),("🧑‍🚒","firefighter"),
+        ("👷","construction_worker"),("🤴","prince"),("👸","princess"),("🧙","mage"),
+        ("🧚","fairy"),("🧛","vampire"),("🧜","merperson"),("🧝","elf"),("🦸","superhero"),
+        ("🦹","supervillain"),("🤶","mrs_claus"),("🎅","santa"),("🧑‍🎄","mx_claus"),
+    ],
+    "Animals": [
+        ("🐶","dog"),("🐱","cat"),("🐭","mouse"),("🐹","hamster"),("🐰","rabbit"),
+        ("🦊","fox"),("🐻","bear"),("🐼","panda"),("🐨","koala"),("🐯","tiger"),
+        ("🦁","lion"),("🐮","cow"),("🐷","pig"),("🐸","frog"),("🐵","monkey"),
+        ("🐔","chicken"),("🐧","penguin"),("🐦","bird"),("🦆","duck"),("🦅","eagle"),
+        ("🦉","owl"),("🦇","bat"),("🐺","wolf"),("🐗","boar"),("🐴","horse"),
+        ("🦄","unicorn"),("🐝","bee"),("🐛","bug"),("🦋","butterfly"),("🐌","snail"),
+        ("🐞","beetle"),("🐜","ant"),("🦟","mosquito"),("🦗","cricket"),("🕷️","spider"),
+        ("🦂","scorpion"),("🐢","turtle"),("🐍","snake"),("🦎","lizard"),("🦖","t_rex"),
+        ("🐊","crocodile"),("🦕","sauropod"),("🐳","whale"),("🐬","dolphin"),("🦭","seal"),
+        ("🐟","fish"),("🐠","tropical_fish"),("🐡","blowfish"),("🦈","shark"),("🐙","octopus"),
+        ("🦑","squid"),("🦐","shrimp"),("🦞","lobster"),("🦀","crab"),("🐚","shell"),
+        ("🌸","cherry_blossom"),("🌺","hibiscus"),("🌻","sunflower"),("🌹","rose"),
+        ("🍀","four_leaf_clover"),("🌿","herb"),("🌱","seedling"),("🌲","evergreen_tree"),
+        ("🌳","deciduous_tree"),("🌴","palm_tree"),("🍄","mushroom"),("🌾","sheaf_of_rice"),
+    ],
+    "Food": [
+        ("🍎","apple"),("🍊","tangerine"),("🍋","lemon"),("🍇","grapes"),("🍓","strawberry"),
+        ("🫐","blueberries"),("🍈","melon"),("🍉","watermelon"),("🍑","peach"),("🍒","cherries"),
+        ("🍌","banana"),("🍍","pineapple"),("🥭","mango"),("🥥","coconut"),("🥝","kiwi"),
+        ("🍅","tomato"),("🥑","avocado"),("🍆","eggplant"),("🥦","broccoli"),("🥕","carrot"),
+        ("🌽","corn"),("🌶️","hot_pepper"),("🥒","cucumber"),("🧄","garlic"),("🧅","onion"),
+        ("🥔","potato"),("🍠","sweet_potato"),("🥐","croissant"),("🍞","bread"),("🥖","baguette"),
+        ("🧀","cheese"),("🥚","egg"),("🍳","fried_egg"),("🥞","pancakes"),("🧇","waffle"),
+        ("🥓","bacon"),("🌭","hotdog"),("🍔","hamburger"),("🍟","fries"),("🍕","pizza"),
+        ("🌮","taco"),("🌯","burrito"),("🥙","stuffed_flatbread"),("🧆","falafel"),
+        ("🍜","ramen"),("🍝","spaghetti"),("🍣","sushi"),("🍱","bento"),("🍛","curry"),
+        ("🍦","soft_ice_cream"),("🍰","cake"),("🎂","birthday"),("🍩","doughnut"),("🍪","cookie"),
+        ("🍫","chocolate"),("🍬","candy"),("🍭","lollipop"),("☕","coffee"),("🍵","tea"),
+        ("🧃","juice"),("🥤","cup_with_straw"),("🍺","beer"),("🍻","beers"),("🥂","clinking_glasses"),
+    ],
+    "Travel": [
+        ("🚗","car"),("🚕","taxi"),("🚙","blue_car"),("🚌","bus"),("🚎","trolleybus"),
+        ("🏎️","racing_car"),("🚓","police_car"),("🚑","ambulance"),("🚒","fire_engine"),
+        ("🚐","minibus"),("🛻","pickup_truck"),("🚚","truck"),("🚛","articulated_lorry"),
+        ("🚜","tractor"),("🛵","motor_scooter"),("🏍️","motorcycle"),("🚲","bike"),
+        ("🛴","kick_scooter"),("🛺","auto_rickshaw"),("🚁","helicopter"),("✈️","airplane"),
+        ("🚀","rocket"),("🛸","flying_saucer"),("⛵","sailboat"),("🚢","ship"),
+        ("🏠","house"),("🏡","house_with_garden"),("🏢","office"),("🏣","post_office"),
+        ("🏥","hospital"),("🏦","bank"),("🏨","hotel"),("🏪","convenience_store"),
+        ("🏫","school"),("🏬","department_store"),("🏭","factory"),("🏯","japanese_castle"),
+        ("🏰","european_castle"),("🗼","tokyo_tower"),("🗽","statue_of_liberty"),
+        ("⛪","church"),("🕌","mosque"),("🛕","hindu_temple"),("🕍","synagogue"),
+        ("🌍","earth_africa"),("🌎","earth_americas"),("🌏","earth_asia"),
+        ("🌋","volcano"),("🏔️","mountain_snow"),("⛰️","mountain"),("🗻","mount_fuji"),
+        ("🏕️","camping"),("🏖️","beach"),("🏜️","desert"),("🏝️","island"),
+        ("🌅","sunrise"),("🌄","sunrise_over_mountains"),("🌠","stars"),("🎇","sparkler"),
+        ("🎆","fireworks"),("🌃","night_with_stars"),("🌆","cityscape_at_dusk"),
+        ("🌇","sunset"),("🌉","bridge_at_night"),
+    ],
+    "Objects": [
+        ("⌚","watch"),("📱","iphone"),("💻","computer"),("⌨️","keyboard"),("🖥️","desktop"),
+        ("🖨️","printer"),("🖱️","computer_mouse"),("💾","floppy_disk"),("💿","cd"),
+        ("📷","camera"),("📸","camera_flash"),("📹","video_camera"),("🎥","movie_camera"),
+        ("📺","tv"),("📻","radio"),("📞","telephone_receiver"),("☎️","telephone"),
+        ("📟","pager"),("📠","fax"),("🔋","battery"),("🔌","electric_plug"),
+        ("💡","bulb"),("🔦","flashlight"),("🕯️","candle"),("🪔","diya_lamp"),
+        ("🧲","magnet"),("🔧","wrench"),("🔨","hammer"),("⚒️","hammer_and_pick"),
+        ("🛠️","hammer_and_wrench"),("⛏️","pick"),("🔩","nut_and_bolt"),("🪛","screwdriver"),
+        ("🔑","key"),("🗝️","old_key"),("🔐","closed_lock_with_key"),("🔒","lock"),
+        ("🔓","unlock"),("🪤","mouse_trap"),("🧰","toolbox"),("🪜","ladder"),
+        ("📦","package"),("📫","mailbox"),("📬","open_mailbox"),("📭","open_mailbox_lowered"),
+        ("📮","postbox"),("🗳️","ballot_box"),("✏️","pencil2"),("📝","memo"),
+        ("📁","file_folder"),("📂","open_file_folder"),("📅","date"),("📆","calendar"),
+        ("📊","bar_chart"),("📈","chart_with_upwards_trend"),("📉","chart_with_downwards_trend"),
+        ("📋","clipboard"),("📌","pushpin"),("📍","round_pushpin"),("📎","paperclip"),
+        ("🖇️","paperclips"),("📏","straight_ruler"),("📐","triangular_ruler"),
+        ("✂️","scissors"),("🗃️","card_file_box"),("🗄️","file_cabinet"),("🗑️","wastebasket"),
+        ("🔍","mag"),("🔎","mag_right"),("🔬","microscope"),("🔭","telescope"),
+        ("💊","pill"),("🩺","stethoscope"),("🩹","adhesive_bandage"),("🧬","dna"),
+        ("🧪","test_tube"),("🧫","petri_dish"),("🧲","magnet"),
+        ("🎁","gift"),("🎀","ribbon"),("🎊","confetti_ball"),("🎉","tada"),
+        ("🎈","balloon"),("🎏","flags"),("🎐","wind_chime"),("🎑","rice_scene"),
+        ("🧧","red_envelope"),("🎎","dolls"),("🎍","bamboo"),("🎋","tanabata_tree"),
+        ("🎃","jack_o_lantern"),("🎄","christmas_tree"),("🎆","fireworks"),
+        ("🏆","trophy"),("🥇","first_place"),("🥈","second_place"),("🥉","third_place"),
+        ("🎖️","medal"),("🏅","sports_medal"),("🎗️","reminder_ribbon"),
+        ("⚽","soccer"),("🏀","basketball"),("🏈","football"),("⚾","baseball"),
+        ("🥎","softball"),("🎾","tennis"),("🏐","volleyball"),("🏉","rugby_football"),
+        ("🎱","8ball"),("🏓","ping_pong"),("🏸","badminton"),("🥊","boxing_glove"),
+        ("🎯","dart"),("🎳","bowling"),("🎮","video_game"),("🕹️","joystick"),
+        ("🎲","game_die"),("♟️","chess_pawn"),("🎭","performing_arts"),("🎨","art"),
+        ("🎬","clapper"),("🎤","microphone"),("🎧","headphones"),("🎼","musical_score"),
+        ("🎵","musical_note"),("🎶","notes"),("🎷","saxophone"),("🎸","guitar"),
+        ("🎹","musical_keyboard"),("🎺","trumpet"),("🎻","violin"),("🥁","drum"),
+        ("🪘","long_drum"),("🪗","accordion"),
+    ],
+    "Symbols": [
+        ("❤️","heart"),("🧡","orange_heart"),("💛","yellow_heart"),("💚","green_heart"),
+        ("💙","blue_heart"),("💜","purple_heart"),("🖤","black_heart"),("🤍","white_heart"),
+        ("🤎","brown_heart"),("💔","broken_heart"),("❣️","heart_exclamation"),
+        ("💕","two_hearts"),("💞","revolving_hearts"),("💓","heartbeat"),("💗","heartpulse"),
+        ("💖","sparkling_heart"),("💘","cupid"),("💝","gift_heart"),("💟","heart_decoration"),
+        ("☮️","peace"),("✝️","cross"),("☯️","yin_yang"),("✡️","star_of_david"),
+        ("🔯","six_pointed_star"),("🕉️","om"),("☦️","orthodox_cross"),
+        ("⭐","star"),("🌟","star2"),("💫","dizzy"),("✨","sparkles"),("🌙","crescent_moon"),
+        ("☀️","sunny"),("🌤️","sun_small_cloud"),("⛅","partly_sunny"),("🌥️","cloud_sun"),
+        ("🌦️","sun_behind_rain_cloud"),("🌧️","cloud_with_rain"),("⛈️","thunder_cloud_rain"),
+        ("🌩️","cloud_with_lightning"),("🌨️","cloud_with_snow"),("❄️","snowflake"),
+        ("☃️","snowman"),("⛄","snowman_without_snow"),("🌬️","wind_face"),("💨","dash"),
+        ("🌀","cyclone"),("🌈","rainbow"),("🌂","closed_umbrella"),("☂️","umbrella"),
+        ("☔","umbrella_with_rain_drops"),("⚡","zap"),("🔥","fire"),("💧","droplet"),
+        ("🌊","ocean"),("🎵","musical_note"),("🔔","bell"),("🔕","no_bell"),
+        ("✅","white_check_mark"),("❌","x"),("❎","negative_squared_cross_mark"),
+        ("➕","heavy_plus_sign"),("➖","heavy_minus_sign"),("➗","heavy_division_sign"),
+        ("✖️","heavy_multiplication_x"),("♾️","infinity"),("‼️","bangbang"),
+        ("⁉️","interrobang"),("❓","question"),("❔","grey_question"),
+        ("❕","grey_exclamation"),("❗","exclamation"),("🔴","red_circle"),
+        ("🟠","orange_circle"),("🟡","yellow_circle"),("🟢","green_circle"),
+        ("🔵","blue_circle"),("🟣","purple_circle"),("⚫","black_circle"),("⚪","white_circle"),
+        ("🔶","large_orange_diamond"),("🔷","large_blue_diamond"),
+        ("🔸","small_orange_diamond"),("🔹","small_blue_diamond"),
+        ("🔺","small_red_triangle"),("🔻","small_red_triangle_down"),
+        ("💠","diamond_shape_with_a_dot_inside"),("🔘","radio_button"),
+        ("🔲","black_square_button"),("🔳","white_square_button"),
+    ],
+}
 
 
 def _filter_emojis(query: str) -> dict[str, list[tuple[str, str]]]:
-    """Return catalogue filtered by query (case-insensitive name substring)."""
     if not query:
         return EMOJI_CATALOGUE
     q = query.lower()
     result: dict[str, list[tuple[str, str]]] = {}
     for group, entries in EMOJI_CATALOGUE.items():
-        matched = [(char, name) for char, name in entries if q in name.lower()]
+        matched = [(char, name) for char, name in entries if q in name.lower() or q in char]
         if matched:
             result[group] = matched
     return result
@@ -94,16 +213,17 @@ class EmojiPicker(ft.Container):
             on_change=self._on_search_change,
         )
 
-        self._tabs = self._build_tabs(EMOJI_CATALOGUE)
+        self._tabs = ft.Column(expand=True)  # placeholder, built lazily on first open
+        self._catalogue_loaded = False
 
-        column = ft.Column(
+        self._column = ft.Column(
             controls=[self._search_field, self._tabs],
             spacing=4,
             expand=True,
         )
 
         super().__init__(
-            content=column,
+            content=self._column,
             width=350,
             height=400,
             padding=ft.padding.all(8),
@@ -118,19 +238,13 @@ class EmojiPicker(ft.Container):
             **kwargs,
         )
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
     def _build_tabs(self, catalogue: dict[str, list[tuple[str, str]]]) -> ft.Tabs:
         tab_labels = []
         tab_contents = []
-        
         for group, entries in catalogue.items():
             short_label = group.split("&")[0].strip()[:12]
             tab_labels.append(ft.Tab(label=short_label))
             tab_contents.append(_build_grid(entries, self._emoji_clicked))
-        
         return ft.Tabs(
             content=ft.Column([
                 ft.TabBar(tabs=tab_labels),
@@ -148,20 +262,17 @@ class EmojiPicker(ft.Container):
         query = e.control.value or ""
         filtered = _filter_emojis(query)
         new_tabs = self._build_tabs(filtered)
-        
-        # Replace the tabs content
-        self._tabs.content = new_tabs.content
-        self._tabs.length = new_tabs.length
-        self._tabs.selected_index = 0
-        
+        self._column.controls[1] = new_tabs
+        self._tabs = new_tabs
         if self.page:
-            self.update()
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+            self._column.update()
 
     def open(self) -> None:
+        if not self._catalogue_loaded:
+            real_tabs = self._build_tabs(EMOJI_CATALOGUE)
+            self._column.controls[1] = real_tabs
+            self._tabs = real_tabs
+            self._catalogue_loaded = True
         self.visible = True
         if self.page:
             self.update()

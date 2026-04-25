@@ -1,5 +1,4 @@
 import flet as ft
-import emoji
 
 
 class MarkdownViewer(ft.Container):
@@ -29,4 +28,8 @@ class MarkdownViewer(ft.Container):
 
 def resolve_shortcodes(text: str) -> str:
     """Replace :shortcode: patterns with Unicode emoji. Unrecognised shortcodes are left unchanged."""
-    return emoji.emojize(text, language="alias")
+    try:
+        import emoji
+        return emoji.emojize(text, language="alias")
+    except Exception:
+        return text

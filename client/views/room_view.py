@@ -14,16 +14,20 @@ from views.widgets.emoji_picker import EmojiPicker
 
 def room_view(page: flet.Page, state: AppState) -> None:
     room = state.active_room
+    print(f"[room_view] entered, room={room}")
     if room is None:
+        print(f"[room_view] room is None, returning early")
         return
 
     page.bgcolor = "#efeae2"
+    print(f"[room_view] creating widgets...")
 
     messages_list = flet.ListView(
         expand=True,
         spacing=6,
         auto_scroll=False,
     )
+    print(f"[room_view] messages_list ok")
 
     message_input = flet.TextField(
         label=t("room.message_hint"),
@@ -35,6 +39,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         border_color=flet.Colors.TRANSPARENT,
         color=flet.Colors.BLACK
     )
+    print(f"[room_view] message_input ok")
 
     reconnecting_banner = flet.Container(
         content=flet.Text(
@@ -49,6 +54,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         border_radius=4,
         alignment=flet.alignment.Alignment(0, 0),
     )
+    print(f"[room_view] reconnecting_banner ok")
 
     _state: dict = {"min_id": None, "loading_older": False, "ws_client": None, "user_at_bottom": True, "messages_data": []}
 
@@ -62,6 +68,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         open=False,
     )
     page.overlay.append(_profile_sheet)
+    print(f"[room_view] profile_sheet ok")
 
     # Emoji picker callbacks
     def _on_emoji_selected(emoji_char: str) -> None:
@@ -79,11 +86,13 @@ def room_view(page: flet.Page, state: AppState) -> None:
         page.update()
 
     # Create emoji picker
+    print(f"[room_view] creating EmojiPicker...")
     emoji_picker = EmojiPicker(
         on_emoji_selected=_on_emoji_selected,
         on_close=_on_emoji_picker_close,
     )
     page.overlay.append(emoji_picker)
+    print(f"[room_view] EmojiPicker ok")
 
     def _toggle_emoji_picker(e: flet.ControlEvent) -> None:
         """Toggle emoji picker visibility."""
@@ -681,6 +690,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
     )
 
     # Create formatting toolbar
+    print(f"[room_view] creating FormattingToolbar...")
     formatting_toolbar = FormattingToolbar(
         get_value=lambda: message_input.value or "",
         set_value=lambda v: setattr(message_input, 'value', v),  # No need for page.update()
@@ -688,8 +698,10 @@ def room_view(page: flet.Page, state: AppState) -> None:
         text_field=message_input,  # Pass TextField reference for selection support
         disabled=False,  # For now, use False since there's no read-only state
     )
+    print(f"[room_view] FormattingToolbar ok")
 
     page.controls.clear()
+    print(f"[room_view] controls cleared, building UI...")
     page.add(
         flet.Column(
             controls=[
@@ -738,5 +750,6 @@ def room_view(page: flet.Page, state: AppState) -> None:
         )
     )
     page.update()
+    print(f"[room_view] page.update() done, starting tasks...")
     page.run_task(_initial_load)
     page.run_task(_start_ws)

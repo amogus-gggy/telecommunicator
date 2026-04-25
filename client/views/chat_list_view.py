@@ -212,10 +212,14 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             icon_color = "#667781"
 
         async def on_open(e: flet.ControlEvent, r: dict = room) -> None:
+            print(f"[chat_list] opening room id={r['id']} name={r.get('name')!r} type={r.get('room_type')}")
             state.active_room = RoomDTO(**{k: r[k] for k in RoomDTO.__dataclass_fields__})
             _stop_refresh()
+            print(f"[chat_list] refresh stopped, importing room_view...")
             from views.room_view import room_view
+            print(f"[chat_list] calling room_view...")
             room_view(page, state)
+            print(f"[chat_list] room_view returned")
 
         subtitle_parts = []
         if room_type != "personal":

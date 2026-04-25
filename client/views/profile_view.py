@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import sys
+
 import flet
 
 from api.http_client import APIClient, AuthError, ValidationError
@@ -362,6 +365,36 @@ def profile_view(page: flet.Page, state: AppState) -> None:
                                                 on_click=_save_alignment,
                                                 style=flet.ButtonStyle(
                                                     bgcolor="#008069",
+                                                    color="#ffffff",
+                                                    shape=flet.RoundedRectangleBorder(radius=8),
+                                                    padding=flet.padding.symmetric(vertical=12, horizontal=24),
+                                                ),
+                                            ),
+                                        ],
+                                        spacing=12,
+                                    ),
+                                    padding=20,
+                                ),
+                                bgcolor="#ffffff",
+                                elevation=1,
+                            ),
+                            flet.Card(
+                                content=flet.Container(
+                                    content=flet.Column(
+                                        controls=[
+                                            flet.Text(
+                                                "Dev",
+                                                size=16,
+                                                weight=flet.FontWeight.W_600,
+                                                color="#ea4335",
+                                            ),
+                                            flet.Divider(height=8),
+                                            flet.ElevatedButton(
+                                                "Exit (show logs)",
+                                                icon=flet.Icons.BUG_REPORT,
+                                                on_click=lambda _: sys.exit(100),
+                                                style=flet.ButtonStyle(
+                                                    bgcolor="#ea4335",
                                                     color="#ffffff",
                                                     shape=flet.RoundedRectangleBorder(radius=8),
                                                     padding=flet.padding.symmetric(vertical=12, horizontal=24),
