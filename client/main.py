@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import logging
+import sys
 
 import flet
 
@@ -16,6 +17,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 _SETTINGS_DIR_FALLBACK = os.path.join(os.path.dirname(__file__), "storage", "data")
+
+# needed for tests and sometimes android support
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 async def main(page: flet.Page) -> None:

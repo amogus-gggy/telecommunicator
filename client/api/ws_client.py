@@ -7,7 +7,7 @@ from typing import Callable
 import websockets
 import websockets.exceptions
 
-from config import WS_URL
+from client.config import WS_URL
 
 
 class WsClient:
