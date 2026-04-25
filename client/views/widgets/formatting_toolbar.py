@@ -145,4 +145,5 @@ class FormattingToolbar(ft.Row):
 
         if self._text_field is not None:
             self._text_field.update()
+            # TODO: Make this async or just run through page.run_task
             self._text_field.focus()
