@@ -48,22 +48,17 @@ class FormattingToolbar(ft.Row):
         
         # Track selection changes if text_field is provided
         if self._text_field is not None:
-            original_on_change = self._text_field.on_selection_change
-            
+            original_on_selection_change = self._text_field.on_selection_change
+
             def on_selection_change(e):
                 if e.control.selection is not None:
                     self._last_selection_start = e.control.selection.start
                     self._last_selection_end = e.control.selection.end
-                else:
-                    self._last_selection_start = None
-                    self._last_selection_end = None
-                
-                # Call original handler if it exists
-                if original_on_change is not None:
-                    original_on_change(e)
-            
+                if original_on_selection_change is not None:
+                    original_on_selection_change(e)
+
             self._text_field.on_selection_change = on_selection_change
-        
+
         # Define formatting actions
         actions = [
             _FormatAction(
@@ -102,7 +97,7 @@ class FormattingToolbar(ft.Row):
                 placeholder="quote",
             ),
         ]
-        
+
         # Create icon buttons for each action
         self.controls = [
             ft.IconButton(
@@ -113,41 +108,41 @@ class FormattingToolbar(ft.Row):
             )
             for action in actions
         ]
-    
+
     def _apply(self, action: _FormatAction) -> None:
-        """Apply a formatting action at the current cursor position or wrap selected text.
-        
-        Args:
-            action: The formatting action to apply
-        """
-        # Get current value
+        """Apply a formatting action at the current cursor position or wrap selected text."""
         value = self._get_value()
-        
-        # Use the last tracked selection
+
         selection_start = self._last_selection_start
         selection_end = self._last_selection_end
-        
-        # If we have a valid selection, wrap it
-        if selection_start is not None and selection_end is not None and selection_start != selection_end:
-            # Wrap the selected text
+
+        has_selection = (
+            selection_start is not None
+            and selection_end is not None
+            and selection_start != selection_end
+        )
+
+        if has_selection:
             selected_text = value[selection_start:selection_end]
-            new_value = value[:selection_start] + action.prefix + selected_text + action.suffix + value[selection_end:]
+            new_value = (
+                value[:selection_start]
+                + action.prefix
+                + selected_text
+                + action.suffix
+                + value[selection_end:]
+            )
         else:
-            # No selection, insert at cursor position
             cursor = self._get_cursor()
-            
-            # Fall back to end of string if cursor is None
             if cursor is None:
                 cursor = len(value)
-            
-            # Clamp cursor to valid range
             cursor = max(0, min(cursor, len(value)))
-            
-            # Build the insertion text
+
             insertion = action.prefix + action.placeholder + action.suffix
-            
-            # Insert at cursor position
             new_value = value[:cursor] + insertion + value[cursor:]
-        
-        # Update the value
+
         self._set_value(new_value)
+
+
+        if self._text_field is not None:
+            self._text_field.update()
+            self._text_field.focus()

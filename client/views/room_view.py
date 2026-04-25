@@ -683,7 +683,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
     # Create formatting toolbar
     formatting_toolbar = FormattingToolbar(
         get_value=lambda: message_input.value or "",
-        set_value=lambda v: setattr(message_input, 'value', v) or page.update(),
+        set_value=lambda v: setattr(message_input, 'value', v),  # No need for page.update()
         get_cursor=lambda: None,  # Flet TextField doesn't expose cursor_position
         text_field=message_input,  # Pass TextField reference for selection support
         disabled=False,  # For now, use False since there's no read-only state
