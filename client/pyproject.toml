@@ -16,6 +16,7 @@ permissions = [
 adaptive_icon_background = "#2196F3"
 adaptive_icon_foreground = "assets/images/icon.png"
 min_sdk_version = 26
+split_per_abi = true
 
 [tool.flet.compile]
 app = false
