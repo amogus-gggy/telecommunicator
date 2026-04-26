@@ -62,7 +62,7 @@ async def login_ui(page: ft.Page):
                 decoration_color=ft.Colors.BLUE
             )
         ),
-        on_tap=lambda _: page.push_route("/auth/register")
+        on_tap=lambda _: page.go("/auth/register")
     )
 
     vspacer = ft.VerticalDivider(40, color=ft.Colors.TRANSPARENT)
@@ -92,5 +92,8 @@ async def login_ui(page: ft.Page):
 
     return ft.View(
         controls=[card],
-        route="/auth/login"
+        route="/auth/login",
+        vertical_alignment=ft.MainAxisAlignment.CENTER,
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        bgcolor = cnst.COL_BACKGROUND
     )
