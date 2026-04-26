@@ -11,7 +11,7 @@ async def main(page: ft.Page):
 
     async def route_changed(e):
         page.views.clear()
-        page.controls.clear()
+
         if page.route == "/auth/login":
             page.views.append(await views.login.login_ui(page))
         elif page.route == "/auth/register":
@@ -20,6 +20,6 @@ async def main(page: ft.Page):
         page.update()
     
     page.on_route_change = route_changed
-    await page.push_route("/auth/login")
+    await page.push_route("/auth/register")
 
 ft.run(main)
