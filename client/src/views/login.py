@@ -30,7 +30,7 @@ async def login_ui(page: ft.Page):
 
     username = ft.TextField(
         value=state["username"],
-        hint_text="Username",
+        label="Username",
         autocorrect=False,
         border_radius=10,
         border_width=0,
@@ -40,7 +40,7 @@ async def login_ui(page: ft.Page):
     )
     password = ft.TextField(
         value=state["password"],
-        hint_text="Password",
+        label="Password",
         autocorrect=False,
         password=True,
         can_reveal_password=True,
@@ -58,7 +58,7 @@ async def login_ui(page: ft.Page):
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
         spacing=0,
         controls=[
-            ft.Text("Need an account? ")
+            ft.Text("Need an account? ", color=cnst.COL_TEXT)
         ]
     )
     hyperlink_button = ft.GestureDetector(
