@@ -12,7 +12,7 @@ async def login_ui(page: ft.Page):
     card = ft.Container(
         bgcolor=cnst.COL_CARD,
         padding=20,
-        border_radius=10
+        border_radius=cnst.BORDER_RADIUS
     )
 
     column = ft.Column(
@@ -32,7 +32,7 @@ async def login_ui(page: ft.Page):
         value=state["username"],
         label="Username",
         autocorrect=False,
-        border_radius=10,
+        border_radius=cnst.BORDER_RADIUS,
         border_width=0,
         bgcolor=cnst.COL_TEXT_FIELD,
         color=cnst.COL_TEXT,
@@ -44,7 +44,7 @@ async def login_ui(page: ft.Page):
         autocorrect=False,
         password=True,
         can_reveal_password=True,
-        border_radius=10,
+        border_radius=cnst.BORDER_RADIUS,
         border_width=0,
         bgcolor=cnst.COL_TEXT_FIELD,
         color=cnst.COL_TEXT,
