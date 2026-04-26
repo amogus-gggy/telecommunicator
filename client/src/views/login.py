@@ -4,11 +4,6 @@ import assets.constants as cnst
 async def login_ui(page: ft.Page):
     page.title = "Telecommunicator - Login"
 
-    page.vertical_alignment=ft.MainAxisAlignment.CENTER
-    page.horizontal_alignment=ft.CrossAxisAlignment.CENTER
-
-    page.bgcolor = cnst.COL_BACKGROUND
-
     card = ft.Container(
         bgcolor=cnst.COL_CARD,
         padding=20,
@@ -67,7 +62,7 @@ async def login_ui(page: ft.Page):
                 decoration_color=ft.Colors.BLUE
             )
         ),
-        on_tap=lambda _: page.go("/register")
+        on_tap=lambda _: page.push_route("/auth/register")
     )
 
     vspacer = ft.VerticalDivider(40, color=ft.Colors.TRANSPARENT)
@@ -94,3 +89,8 @@ async def login_ui(page: ft.Page):
     column.controls.append(row)
 
     card.content = column
+
+    return ft.View(
+        controls=[card],
+        route="/auth/login"
+    )
