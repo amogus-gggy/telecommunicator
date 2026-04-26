@@ -650,6 +650,16 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 # Send message with file metadata
                 print(f"[SEND] Sending message with files: {uploaded_files}")
                 await ws.send_message(room.id, resolved_body, files=uploaded_files)
+
+                # re-render
+                if attached_files:
+                    _state["messages_data"][-1]["files"] = uploaded_files
+
+                    messages_list.controls[-1] = _build_message_tile(
+                        _state["messages_data"][-1]
+                    )
+                    page.update()
+
                 # Clear attached files after sending
                 attached_files.clear()
 
