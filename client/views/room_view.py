@@ -51,39 +51,6 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
         page.update()
 
-    async def _download_file(file_id: int) -> None:
-        client = APIClient(base_url=API_URL, state=state)
-
-        try:
-            url = f"{API_URL}/rooms/{room.id}/files/{file_id}/download"
-
-            # stream download (non-blocking)
-            async with httpx.AsyncClient() as http:
-                r = await http.get(url, headers=client._headers())
-                r.raise_for_status()
-
-                filename = f"download_{file_id}"
-                with open(filename, "wb") as f:
-                    f.write(r.content)
-
-            page.snack_bar = flet.SnackBar(
-                flet.Text(f"Downloaded {filename}", color="#fff"),
-                open=True,
-                bgcolor="#008069",
-            )
-            page.update()
-
-        except Exception as e:
-            page.snack_bar = flet.SnackBar(
-                flet.Text(str(e), color="#fff"),
-                open=True,
-                bgcolor="#ea4335",
-            )
-            page.update()
-
-        finally:
-            await client.aclose()
-
     message_input = flet.TextField(
         label=t("room.message_hint"),
         expand=True,
@@ -274,19 +241,23 @@ def room_view(page: flet.Page, state: AppState) -> None:
             file_id_val = f["id"]
             file_name_val = f.get("filename", "download")
 
-            # This function captures file_id_val and file_name_val from its closure.
             async def local_download_task(fid: int, fname: str):
-                # Reuse the logic from the outer _download_file function.
-                # It needs access to outer scope variables like API_URL, state, room, httpx.
-                # These are accessible via closure from room_view's scope.
                 client = APIClient(base_url=API_URL, state=state)
                 try:
                     url = f"{API_URL}/rooms/{room.id}/files/{fid}/download"
+
+                    save_path = await file_picker.save_file(file_name=fname, file_type=flet.FilePickerFileType.ANY)
+
+                    if not save_path:
+                        return
+
                     async with httpx.AsyncClient() as http:
                         r = await http.get(url, headers=client._headers())
                         r.raise_for_status()
-                        with open(fname, "wb") as f_save:
+
+                        with open(save_path, "wb") as f_save:
                             f_save.write(r.content)
+
                         page.snack_bar = flet.SnackBar(
                             flet.Text(f"Downloaded {fname}", color="#fff"),
                             open=True,
