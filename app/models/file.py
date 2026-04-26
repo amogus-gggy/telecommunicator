@@ -1,8 +1,11 @@
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
 from sqlalchemy.sql import func
 from sqlalchemy.orm import Mapped, relationship
-from typing import Optional # Import Optional
+from typing import Optional, TYPE_CHECKING
 from app.db.base import Base
+
+if TYPE_CHECKING:
+    from app.models.message import Message
 
 class File(Base):
     __tablename__ = "room_files"
