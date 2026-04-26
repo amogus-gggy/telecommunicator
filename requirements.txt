@@ -11,3 +11,4 @@ flet
 hypothesis
 pytest
 pytest-asyncio
+python-multipart
