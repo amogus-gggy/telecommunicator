@@ -67,12 +67,25 @@ class WsClient:
             await asyncio.sleep(delay)
             delay = min(delay * 2, self._MAX_DELAY)
 
-    async def send_message(self, room_id: int, body: str) -> None:
-        """Send a WsInbound message frame."""
+    async def send_message(
+        self,
+        room_id: int,
+        body: str,
+        files: list[dict] | None = None,
+    ) -> None:
         if self._ws is None:
             return
-        frame = json.dumps({"type": "message", "room_id": room_id, "body": body})
-        await self._ws.send(frame)
+
+        frame = {
+            "type": "message",
+            "room_id": room_id,
+            "body": body,
+        }
+
+        if files is not None:
+            frame["files"] = files
+
+        await self._ws.send(json.dumps(frame))
 
     def close(self) -> None:
         """Signal the client to stop reconnecting."""

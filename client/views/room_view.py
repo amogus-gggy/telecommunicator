@@ -11,6 +11,8 @@ from views.widgets.markdown_viewer import MarkdownViewer, resolve_shortcodes
 from views.widgets.formatting_toolbar import FormattingToolbar
 from views.widgets.emoji_picker import EmojiPicker
 
+import httpx 
+
 
 def room_view(page: flet.Page, state: AppState) -> None:
     room = state.active_room
@@ -28,9 +30,59 @@ def room_view(page: flet.Page, state: AppState) -> None:
         auto_scroll=False,
     )
 
+    file_picker: flet.FilePicker = flet.FilePicker()
+
+    attached_files: list[flet.FilePickerFile] = []
+    attached_preview = flet.Row(scroll="auto", spacing=6)
+
     async def pick_file(e):
-        files = await flet.FilePicker().pick_files(allow_multiple=True)
-        print(files)
+        files = await file_picker.pick_files(allow_multiple=True)
+        
+        if files is not None:
+            for file in files:
+                attached_files.append(file)
+
+        attached_preview.controls.clear()
+
+        for f in attached_files:
+            attached_preview.controls.append(
+                flet.Text(f.name, size=12)
+            )
+
+        page.update()
+
+    async def _download_file(file_id: int) -> None:
+        client = APIClient(base_url=API_URL, state=state)
+
+        try:
+            url = f"{API_URL}/rooms/{room.id}/files/{file_id}/download"
+
+            # stream download (non-blocking)
+            async with httpx.AsyncClient() as http:
+                r = await http.get(url, headers=client._headers())
+                r.raise_for_status()
+
+                filename = f"download_{file_id}"
+                with open(filename, "wb") as f:
+                    f.write(r.content)
+
+            page.snack_bar = flet.SnackBar(
+                flet.Text(f"Downloaded {filename}", color="#fff"),
+                open=True,
+                bgcolor="#008069",
+            )
+            page.update()
+
+        except Exception as e:
+            page.snack_bar = flet.SnackBar(
+                flet.Text(str(e), color="#fff"),
+                open=True,
+                bgcolor="#ea4335",
+            )
+            page.update()
+
+        finally:
+            await client.aclose()
 
     message_input = flet.TextField(
         label=t("room.message_hint"),
@@ -216,6 +268,82 @@ def room_view(page: flet.Page, state: AppState) -> None:
         bubble_color = "#d9fdd3" if is_me else "#ffffff"
         name_color = "#008069"
 
+        file_controls = []
+
+        for f in msg.get("files", []):
+            file_id_val = f["id"]
+            file_name_val = f.get("filename", "download")
+
+            # This function captures file_id_val and file_name_val from its closure.
+            async def local_download_task(fid: int, fname: str):
+                # Reuse the logic from the outer _download_file function.
+                # It needs access to outer scope variables like API_URL, state, room, httpx.
+                # These are accessible via closure from room_view's scope.
+                client = APIClient(base_url=API_URL, state=state)
+                try:
+                    url = f"{API_URL}/rooms/{room.id}/files/{fid}/download"
+                    async with httpx.AsyncClient() as http:
+                        r = await http.get(url, headers=client._headers())
+                        r.raise_for_status()
+                        with open(fname, "wb") as f_save:
+                            f_save.write(r.content)
+                        page.snack_bar = flet.SnackBar(
+                            flet.Text(f"Downloaded {fname}", color="#fff"),
+                            open=True,
+                            bgcolor="#008069",
+                        )
+                except Exception as e:
+                    page.snack_bar = flet.SnackBar(
+                        flet.Text(str(e), color="#fff"),
+                        open=True,
+                        bgcolor="#ea4335",
+                    )
+                finally:
+                    await client.aclose()
+                page.update() # Ensure snackbar is visible
+
+            file_controls.append(
+                flet.Container(
+                    padding=10,
+                    border_radius=12,
+                    bgcolor=flet.Colors.with_opacity(0.06, flet.Colors.ON_SURFACE),
+                    margin=flet.margin.symmetric(vertical=4),
+                    content=flet.Row(
+                        alignment=flet.MainAxisAlignment.SPACE_BETWEEN,
+                        vertical_alignment=flet.CrossAxisAlignment.CENTER,
+                        controls=[
+                            flet.Row(
+                                spacing=10,
+                                controls=[
+                                    flet.Icon(
+                                        flet.Icons.ATTACH_FILE,
+                                        size=18,
+                                        opacity=0.8,
+                                    ),
+                                    flet.Text(
+                                        value=file_name_val,
+                                        size=13,
+                                        weight=flet.FontWeight.W_500,
+                                        overflow=flet.TextOverflow.ELLIPSIS,
+                                    ),
+                                ],
+                            ),
+
+                            flet.IconButton(
+                                icon=flet.Icons.DOWNLOAD,
+                                icon_size=18,
+                                tooltip="Download",
+                                on_click=lambda e: page.run_task(
+                                    local_download_task,
+                                    file_id_val,
+                                    file_name_val,
+                                ),
+                            ),
+                        ],
+                    ),
+                )
+            )
+
         bubble = flet.Container(
             content=flet.Column(
                 controls=[
@@ -232,6 +360,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     if not is_me
                     else flet.Container(),
                     MarkdownViewer(value=body),
+                    *file_controls,
                     flet.Row(
                         controls=[
                             flet.Text(ts, size=10, color="#667781"),
@@ -310,11 +439,12 @@ def room_view(page: flet.Page, state: AppState) -> None:
         return _state.get("user_at_bottom", True)
 
     def _on_ws_message(payload: dict) -> None:
-        print(f"[WS] Received message payload: {payload}")
+        print(f"[WS] Received raw payload: {payload}") # Log raw payload
         if payload.get("type") == "message":
             msg = payload.get("payload", payload)
-            print(f"[WS] Processing message: {msg.get('id', 'no-id')} from {msg.get('author_username', 'unknown')}")
-            
+            print(f"[WS] Processed message payload: {msg}") # Log processed message
+            print(f"[WS] Files section in message: {msg.get('files', [])}") # Log files section
+
             # Check if this is our own message (optimistic update already shown)
             is_own_message = (
                 state.current_user is not None
@@ -449,8 +579,12 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
     async def _send_message() -> None:
         body = (message_input.value or "").strip()
+
+        if not body and attached_files:
+            body = "📎"
+
         print(f"[SEND] Attempting to send message: '{body}'")
-        if not body:
+        if not body and not attached_files:
             print(f"[SEND] Empty message, aborting")
             return
         ws: WsClient | None = _state.get("ws_client")
@@ -472,6 +606,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 "id": None,
                 "temp_id": temp_id,
                 "body": resolved_body,
+                "files": [],
                 "author_username": state.current_user.username if state.current_user else "?",
                 "author_display_name": state.current_user.display_name if state.current_user else None,
                 "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -494,7 +629,32 @@ def room_view(page: flet.Page, state: AppState) -> None:
             
             # Send message via WebSocket
             print(f"[SEND] Sending message via WebSocket...")
-            await ws.send_message(room.id, resolved_body)
+            client = APIClient(base_url=API_URL, state=state)
+
+            try:
+                # Upload files first
+                uploaded_files = []
+
+                for f in attached_files:
+                    with open(f.path, "rb") as file_data:
+                        files = {"file": (f.name, file_data)}
+                        async with httpx.AsyncClient() as http:
+                            response = await http.post(
+                                f"{API_URL}/rooms/{room.id}/files",
+                                headers=client._headers(),
+                                files={"file": (f.name, open(f.path, "rb"))},
+                            )
+                            response.raise_for_status()
+                            uploaded_files.append(response.json())
+
+                # Send message with file metadata
+                print(f"[SEND] Sending message with files: {uploaded_files}")
+                await ws.send_message(room.id, resolved_body, files=uploaded_files)
+                # Clear attached files after sending
+                attached_files.clear()
+
+            finally:
+                await client.aclose()
             print(f"[SEND] Message sent")
         except Exception as exc:
             print(f"[SEND] Error sending message: {exc}")
@@ -721,6 +881,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     content=flet.Column(
                         controls=[
                             formatting_toolbar,
+                            attached_preview,
                             flet.Row(
                                 controls=[
                                     flet.IconButton(

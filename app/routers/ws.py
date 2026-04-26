@@ -103,7 +103,7 @@ async def websocket_endpoint(ws: WebSocket, token: str | None = None, room_id: i
 
                 try:
                     # Pass room to avoid a second fetch inside send_message
-                    await send_message(room_id=froom_id, body=body, author=user, db=db, room=room)
+                    await send_message(room_id=froom_id, body=body, author=user, db=db, room=room, files=frame.files)
                 except Exception as exc:
                     detail = getattr(exc, "detail", str(exc))
                     await ws.send_json({"type": "error", "payload": detail})

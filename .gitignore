@@ -5,3 +5,4 @@ __pycache__
 .pytest_cache
 messenger.db
 client/build
+uploads

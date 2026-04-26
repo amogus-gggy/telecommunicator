@@ -1,12 +1,15 @@
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, desc # Import desc
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload # Import selectinload
 
+from app.db.base import Base # Assuming Base is imported correctly
+from app.models.file import File # Import File model
 from app.models.message import Message
 from app.models.room import Room
 from app.models.room_member import RoomMember
 from app.models.user import User
-from app.schemas.messages import MessageResponse
+from app.schemas.messages import MessageResponse # MessageResponse now includes 'files'
 from app.ws.connection_manager import manager
 
 _DEFAULT_PAGE_SIZE = 50
@@ -20,10 +23,12 @@ async def send_message(
     db: AsyncSession,
     *,
     room: Room | None = None,
+    files: list[dict] | None = None, # Accept files argument
 ) -> MessageResponse:
     """Validate, persist, and broadcast a message. Raises HTTPException on failure.
 
     Pass ``room`` if you already have the Room object to avoid a redundant fetch.
+    Processes and associates uploaded files with the message.
     """
     # Body validation (cheap, do first)
     if not body or len(body) > 2000:
@@ -51,19 +56,66 @@ async def send_message(
             status_code=403, detail="Room is read-only; only the owner can send messages"
         )
 
-    # Persist
+    # Persist Message
     msg = Message(room_id=room_id, author_id=author.id, body=body)
     db.add(msg)
     await db.commit()
-    await db.refresh(msg)
+    await db.refresh(msg) # Refresh to get msg.id
+
+    # Associate files with the message
+    if files:
+        for file_data in files:
+            file_id = file_data.get("id")
+            if file_id:
+                # Fetch the File ORM object by its ID
+                file_orm = await db.get(File, file_id)
+                if file_orm:
+                    # Ensure the file belongs to this room and was uploaded by this user
+                    # If file upload is separate, we trust the client sent valid IDs.
+                    # Additional checks could be added here (e.g., file_orm.room_id == room_id).
+                    file_orm.message_id = msg.id
+                    db.add(file_orm) # Add to session to track changes
+                else:
+                    print(f"Warning: File with ID {file_id} not found for message association.")
+            else:
+                print(f"Warning: File metadata missing 'id' field: {file_data}")
+        await db.commit() # Commit file associations
+
+    # Fetch message and its associated files for the response
+    # Use selectinload to eager load the 'files' relationship
+    stmt = (
+        select(Message)
+        .options(selectinload(Message.files)) # Eager load files
+        .where(Message.id == msg.id)
+    )
+    result = await db.execute(stmt)
+    message_with_files = result.scalar_one_or_none()
+
+    if not message_with_files:
+        raise HTTPException(status_code=500, detail="Failed to retrieve message after saving")
+
+    # Construct MessageResponse, including files
+    response_files = []
+    if message_with_files.files:
+        response_files = [
+            {
+                "id": f.id,
+                "filename": f.filename,
+                "uploader_id": f.uploader_id,
+                "room_id": f.room_id,
+                "created_at": f.created_at.isoformat(),
+            }
+            for f in message_with_files.files
+        ]
 
     response = MessageResponse(
-        id=msg.id,
-        room_id=msg.room_id,
+        id=message_with_files.id,
+        room_id=message_with_files.room_id,
         author_username=author.username,
         author_display_name=author.display_name,
-        body=msg.body,
-        created_at=msg.created_at,
+        body=message_with_files.body,
+        created_at=message_with_files.created_at,
+        files=response_files, # Populate files field
     )
 
     # Broadcast
@@ -71,14 +123,7 @@ async def send_message(
         room_id,
         {
             "type": "message",
-            "payload": {
-                "id": response.id,
-                "room_id": response.room_id,
-                "author_username": response.author_username,
-                "author_display_name": response.author_display_name,
-                "body": response.body,
-                "created_at": response.created_at.isoformat(),
-            },
+            "payload": response.model_dump(), # Use model_dump() for Pydantic v2
         },
     )
 
@@ -104,27 +149,47 @@ async def get_message_history(
     if membership.scalar_one_or_none() is None:
         raise HTTPException(status_code=403, detail="Not a member of this room")
 
-    query = (
+    # Query for messages, authors, and associated files
+    # Eager load the 'files' relationship for each message
+    stmt = (
         select(Message, User)
-        .join(User, Message.author_id == User.id)
+        .join(User, Message.author_id == User.id) # Join with User to get author details
+        .options(selectinload(Message.files)) # Eager load files relationship
         .where(Message.room_id == room_id)
     )
     if before_id is not None:
-        query = query.where(Message.id < before_id)
+        stmt = stmt.where(Message.id < before_id)
 
-    query = query.order_by(Message.id.desc()).limit(limit)
+    stmt = stmt.order_by(desc(Message.id)).limit(limit) # Order by ID descending for history
 
-    result = await db.execute(query)
-    rows = result.all()
+    result = await db.execute(stmt)
+    rows_with_details = result.all() # List of (Message, User) tuples
 
-    return [
-        MessageResponse(
-            id=msg.id,
-            room_id=msg.room_id,
-            author_username=author.username,
-            author_display_name=author.display_name,
-            body=msg.body,
-            created_at=msg.created_at,
+    message_responses = []
+    for msg_orm, author_orm in rows_with_details:
+        message_files = []
+        if msg_orm.files: # Check if files relationship is loaded and not empty
+            message_files = [
+                {
+                    "id": f.id,
+                    "filename": f.filename,
+                    "uploader_id": f.uploader_id,
+                    "room_id": f.room_id,
+                    "created_at": f.created_at.isoformat(),
+                }
+                for f in msg_orm.files
+            ]
+
+        message_responses.append(
+            MessageResponse(
+                id=msg_orm.id,
+                room_id=msg_orm.room_id,
+                author_username=author_orm.username,
+                author_display_name=author_orm.display_name,
+                body=msg_orm.body,
+                created_at=msg_orm.created_at,
+                files=message_files, # Populate files field
+            )
         )
-        for msg, author in rows
-    ]
+
+    return message_responses
