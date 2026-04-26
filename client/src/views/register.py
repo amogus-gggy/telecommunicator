@@ -1,5 +1,7 @@
 import flet as ft
 import assets.constants as cnst
+import email_validator as emval
+import asyncio
 
 state = {
     "username": "",
@@ -7,13 +9,38 @@ state = {
     "password": ""
 }
 
+email_checker_thread = None
+async def on_email_change(e, page, err):
+    global email_checker_thread
+    state["email"] = e.control.value
+
+    if email_checker_thread: email_checker_thread.cancel()
+    if not state["email"]:
+        err.visible = False
+        page.update()
+        return
+
+    async def task():
+        try:
+            await asyncio.sleep(cnst.DAT_AUTH_EMAIL_DELAY)
+
+            emval.validate_email(state["email"])
+            err.visible = False
+        except (emval.EmailNotValidError, asyncio.CancelledError):
+            err.visible = not isinstance(e, asyncio.CancelledError)
+        
+        page.update()
+    
+    email_checker_thread = asyncio.create_task(task())
+
+
 async def register_ui(page: ft.Page):
     page.title = "Telecommunicator - Register"
 
     card = ft.Container(
         bgcolor=cnst.COL_CARD,
         padding=20,
-        border_radius=10
+        border_radius=cnst.BORDER_RADIUS
     )
 
     column = ft.Column(
@@ -31,31 +58,40 @@ async def register_ui(page: ft.Page):
 
     username = ft.TextField(
         value=state["username"],
-        hint_text="Username",
+        label="Username",
         autocorrect=False,
-        border_radius=10,
+        border_radius=cnst.BORDER_RADIUS,
         border_width=0,
         bgcolor=cnst.COL_TEXT_FIELD,
         color=cnst.COL_TEXT,
         on_change=lambda e: state.update({"username": e.control.value})
     )
+
+    email_error = ft.Text(
+        value="Invalid Email",
+        color=ft.Colors.RED,
+        visible=False
+    )
+    async def on_email_change_wrapper(e):
+        return await on_email_change(e, page, email_error)
+
     email = ft.TextField(
         value=state["email"],
-        hint_text="Email",
+        label="Email",
         autocorrect=False,
-        border_radius=10,
+        border_radius=cnst.BORDER_RADIUS,
         border_width=0,
         bgcolor=cnst.COL_TEXT_FIELD,
         color=cnst.COL_TEXT,
-        on_change=lambda e: state.update({"email": e.control.value})
+        on_change=on_email_change_wrapper
     )
     password = ft.TextField(
         value=state["password"],
-        hint_text="Password",
+        label="Password",
         autocorrect=False,
         password=True,
         can_reveal_password=True,
-        border_radius=10,
+        border_radius=cnst.BORDER_RADIUS,
         border_width=0,
         bgcolor=cnst.COL_TEXT_FIELD,
         color=cnst.COL_TEXT,
@@ -69,7 +105,7 @@ async def register_ui(page: ft.Page):
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
         spacing=0,
         controls=[
-            ft.Text("Have an account? ")
+            ft.Text("Have an account? ", color=cnst.COL_TEXT)
         ]
     )
     hyperlink_button = ft.GestureDetector(
@@ -105,6 +141,7 @@ async def register_ui(page: ft.Page):
     column.controls.append(header)
     column.controls.append(username)
     column.controls.append(email)
+    column.controls.append(email_error)
     column.controls.append(password)
     column.controls.append(hspacer)
     column.controls.append(row)
