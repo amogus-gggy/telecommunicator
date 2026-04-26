@@ -1,6 +1,12 @@
 import flet as ft
 import assets.constants as cnst
 
+state = {
+    "username": "",
+    "email": "",
+    "password": ""
+}
+
 async def register_ui(page: ft.Page):
     page.title = "Telecommunicator - Register"
 
@@ -24,22 +30,27 @@ async def register_ui(page: ft.Page):
     )
 
     username = ft.TextField(
+        value=state["username"],
         hint_text="Username",
         autocorrect=False,
         border_radius=10,
         border_width=0,
         bgcolor=cnst.COL_TEXT_FIELD,
-        color=cnst.COL_TEXT
+        color=cnst.COL_TEXT,
+        on_change=lambda e: state.update({"username": e.control.value})
     )
     email = ft.TextField(
+        value=state["email"],
         hint_text="Email",
         autocorrect=False,
         border_radius=10,
         border_width=0,
         bgcolor=cnst.COL_TEXT_FIELD,
-        color=cnst.COL_TEXT
+        color=cnst.COL_TEXT,
+        on_change=lambda e: state.update({"email": e.control.value})
     )
     password = ft.TextField(
+        value=state["password"],
         hint_text="Password",
         autocorrect=False,
         password=True,
@@ -47,7 +58,8 @@ async def register_ui(page: ft.Page):
         border_radius=10,
         border_width=0,
         bgcolor=cnst.COL_TEXT_FIELD,
-        color=cnst.COL_TEXT
+        color=cnst.COL_TEXT,
+        on_change=lambda e: state.update({"password": e.control.value})
     )
 
     hspacer = ft.Container(height=10, bgcolor=ft.Colors.TRANSPARENT, width=0)
@@ -57,7 +69,7 @@ async def register_ui(page: ft.Page):
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
         spacing=0,
         controls=[
-            ft.Text("Got an account?")
+            ft.Text("Have an account? ")
         ]
     )
     hyperlink_button = ft.GestureDetector(
