@@ -61,9 +61,11 @@ async def send_message(
     db.add(msg)
     await db.commit()
     await db.refresh(msg) # Refresh to get msg.id
+    print(f"[SEND_MESSAGE] Message persisted with ID: {msg.id}")
 
     # Associate files with the message
-    if files:
+    if files and len(files) > 0:
+        print(f"[SEND_MESSAGE] Processing {len(files)} files")
         for file_data in files:
             file_id = file_data.get("id")
             if file_id:
@@ -80,6 +82,9 @@ async def send_message(
             else:
                 print(f"Warning: File metadata missing 'id' field: {file_data}")
         await db.commit() # Commit file associations
+        print(f"[SEND_MESSAGE] Files associated with message")
+    else:
+        print(f"[SEND_MESSAGE] No files to process")
 
     # Fetch message and its associated files for the response
     # Use selectinload to eager load the 'files' relationship
@@ -118,14 +123,16 @@ async def send_message(
         files=response_files, # Populate files field
     )
 
+    print(f"[SEND_MESSAGE] Broadcasting message {response.id} to room {room_id}")
     # Broadcast
     await manager.broadcast(
         room_id,
         {
             "type": "message",
-            "payload": response.model_dump(), # Use model_dump() for Pydantic v2
+            "payload": response.model_dump(mode='json'), # Use mode='json' for proper datetime serialization
         },
     )
+    print(f"[SEND_MESSAGE] Broadcast completed for message {response.id}")
 
     return response
 

@@ -67,7 +67,9 @@ async def websocket_endpoint(ws: WebSocket, token: str | None = None, room_id: i
 
                 try:
                     frame = WsInbound.model_validate_json(raw)
-                except (ValidationError, ValueError):
+                    print(f"[WS] Parsed frame: type={frame.type}, room_id={frame.room_id}, files={frame.files}")
+                except (ValidationError, ValueError) as e:
+                    print(f"[WS] Validation error: {e}")
                     await ws.send_json({"type": "error", "payload": "Invalid message format"})
                     continue
 
@@ -103,7 +105,8 @@ async def websocket_endpoint(ws: WebSocket, token: str | None = None, room_id: i
 
                 try:
                     # Pass room to avoid a second fetch inside send_message
-                    await send_message(room_id=froom_id, body=body, author=user, db=db, room=room, files=frame.files)
+                    files_list = frame.files if frame.files is not None else []
+                    await send_message(room_id=froom_id, body=body, author=user, db=db, room=room, files=files_list)
                 except Exception as exc:
                     detail = getattr(exc, "detail", str(exc))
                     await ws.send_json({"type": "error", "payload": detail})
