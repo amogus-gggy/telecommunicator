@@ -1,11 +1,13 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, UploadFile, HTTPException, File as FastAPIFile
+from fastapi.responses import FileResponse as FastAPIFileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
 from app.db.deps import get_db
 from app.models.user import User
 from app.schemas.rooms import PermissionUpdate, RoomCreate, RoomResponse, PersonalChatRequest
-from app.services import room_service
+from app.services import room_service, file_service
+from app.schemas.files import FileResponse
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
 
@@ -90,3 +92,41 @@ async def update_permissions(
     db: AsyncSession = Depends(get_db),
 ) -> RoomResponse:
     return await room_service.update_permissions(room_id, data, current_user, db)
+
+
+@router.get("/{room_id}/files", response_model=list[FileResponse])
+async def list_files(
+    room_id: int,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await file_service.list_files(room_id, user, db)
+
+
+@router.post("/{room_id}/files", response_model=FileResponse)
+async def upload_file(
+    room_id: int,
+    file: UploadFile = FastAPIFile(...),
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await file_service.upload_file(room_id, user, file, db)
+
+
+@router.get("/{room_id}/files/{file_id}/download")
+async def download_file(
+    room_id: int,
+    file_id: int,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    file = await file_service.get_file(file_id, user, db)
+
+    if file.room_id != room_id:
+        raise HTTPException(404)
+
+    return FastAPIFileResponse(
+        file.path,
+        filename=file.filename,
+        media_type="application/octet-stream"
+    )

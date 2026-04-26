@@ -11,12 +11,14 @@ class MessageResponse(BaseModel):
     author_display_name: str | None = None
     body: str
     created_at: datetime
+    files: list[dict] | None = None
 
 
 class WsInbound(BaseModel):
     type: Literal["message"]
     room_id: int
     body: str
+    files: list[dict] | None = None
 
 
 class WsOutbound(BaseModel):

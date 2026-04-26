@@ -6,6 +6,8 @@ DATABASE_URL: str = os.getenv(
     "DATABASE_URL", "sqlite+aiosqlite:///./messenger.db"
 )
 
+print(f"Database URL being used: {DATABASE_URL}") # Log the database URL
+
 _is_sqlite = DATABASE_URL.startswith("sqlite")
 
 _engine_kwargs: dict = {"echo": False}

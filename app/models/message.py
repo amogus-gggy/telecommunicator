@@ -1,10 +1,12 @@
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import ForeignKey, Text, func
-from sqlalchemy.orm import Mapped, mapped_column
-
+from sqlalchemy.orm import Mapped, mapped_column, relationship # Import relationship
 from app.db.base import Base
 
+if TYPE_CHECKING:
+    from app.models.file import File
 
 class Message(Base):
     __tablename__ = "messages"
@@ -18,3 +20,6 @@ class Message(Base):
     )
     body: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    # Relationships
+    files: Mapped[list["File"]] = relationship("File", back_populates="message") # Added files relationship

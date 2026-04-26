@@ -14,6 +14,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+
 logger = logging.getLogger(__name__)
 
 _SETTINGS_DIR_FALLBACK = os.path.join(os.path.dirname(__file__), "storage", "data")
