@@ -21,7 +21,7 @@ split_per_abi = true
 
 [tool.flet.compile]
 app = true
-packages = false
+packages = false # needs to be always false, because of binary packages
 cleanup = false
 
 [tool.flet.splash]
