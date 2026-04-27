@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from client.crypto.key_generator import KeyGenerator
+from crypto.key_generator import KeyGenerator
 
 PBKDF2_ITERATIONS = 600_000
 _SALT_SIZE = 16

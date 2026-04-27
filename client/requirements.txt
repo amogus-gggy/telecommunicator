@@ -3,4 +3,5 @@ httpx==0.28.1
 websockets==16.0
 python-i18n[YAML]>=0.3.9
 certifi
-cryptography
+cryptography==43.0.1
+--extra-index-url https://pypi.flet.dev/simple/

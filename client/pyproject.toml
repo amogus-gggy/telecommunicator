@@ -16,7 +16,7 @@ permissions = [
 ]
 adaptive_icon_background = "#2196F3"
 adaptive_icon_foreground = "assets/images/icon.png"
-min_sdk_version = 26
+min_sdk_version = 24
 split_per_abi = true
 
 [tool.flet.compile]
@@ -39,5 +39,8 @@ dependencies = [
     "websockets==16.0",
     "python-i18n[YAML]==0.3.9",
     "certifi==2025.6.15",
-    "cryptography"
+    "cryptography==43.0.1",
 ]
+
+[[tool.flet.extra_index_urls]]
+url = "https://pypi.flet.dev/simple/"
