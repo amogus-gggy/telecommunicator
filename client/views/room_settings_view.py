@@ -10,6 +10,7 @@ from state import AppState
 
 def room_settings_view(page: flet.Page, state: AppState) -> None:
     page.bgcolor = "#f0f2f5"
+    page.overlay.clear()
     room = state.active_room
 
     def _go_back(e: flet.ControlEvent | None = None) -> None:

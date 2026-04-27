@@ -11,6 +11,7 @@ from state import AppState, RoomDTO
 
 def room_list_view(page: flet.Page, state: AppState) -> None:
     page.bgcolor = "#f0f2f5"
+    page.overlay.clear()
     all_rooms: list[dict] = []
     rooms_column = flet.Column(scroll=flet.ScrollMode.AUTO, expand=True, spacing=8)
     search_field = flet.TextField(

@@ -13,6 +13,7 @@ from state import AppState
 
 def profile_view(page: flet.Page, state: AppState) -> None:
     page.bgcolor = "#f0f2f5"
+    page.overlay.clear()
     user = state.current_user
 
     display_name_info = flet.Text(

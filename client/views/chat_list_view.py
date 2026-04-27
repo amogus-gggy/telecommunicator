@@ -12,6 +12,7 @@ from state import AppState, RoomDTO
 
 def chat_list_view(page: flet.Page, state: AppState) -> None:
     page.bgcolor = "#f0f2f5"
+    page.overlay.clear()
 
     cache_manager = CacheManager(refresh_interval=30, max_age=300)
 

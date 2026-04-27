@@ -10,6 +10,7 @@ from state import AppState, UserDTO
 
 def register_view(page: flet.Page, state: AppState) -> None:
     page.bgcolor = "#f0f2f5"
+    page.overlay.clear()
 
     username_field = flet.TextField(
         label=t("register.username"), autofocus=True, bgcolor="#ffffff", border_color="#e0e0e0", color="#111b21",

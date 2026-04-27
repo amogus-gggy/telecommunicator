@@ -36,7 +36,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
     attached_preview = flet.Row(scroll="auto", spacing=6)
 
     async def pick_file(e):
-        files = await file_picker.pick_files(allow_multiple=True)
+        files = await file_picker.pick_files(allow_multiple=True, with_data=True)
         
         if files is not None:
             for file in files:
@@ -44,11 +44,44 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
         attached_preview.controls.clear()
 
-        for f in attached_files:
+        for i, f in enumerate(attached_files):
+            idx = i
             attached_preview.controls.append(
-                flet.Text(f.name, size=12)
+                flet.Row(
+                    spacing=4,
+                    controls=[
+                        flet.Icon(flet.Icons.ATTACH_FILE, size=14, color="#008069"),
+                        flet.Text(f.name, size=12),
+                        flet.IconButton(
+                            icon=flet.Icons.CLOSE,
+                            icon_size=14,
+                            on_click=lambda e, i=idx: _remove_attached_file(i),
+                        ),
+                    ],
+                )
             )
 
+        page.update()
+
+    def _remove_attached_file(idx: int) -> None:
+        if 0 <= idx < len(attached_files):
+            attached_files.pop(idx)
+        attached_preview.controls.clear()
+        for i, f in enumerate(attached_files):
+            attached_preview.controls.append(
+                flet.Row(
+                    spacing=4,
+                    controls=[
+                        flet.Icon(flet.Icons.ATTACH_FILE, size=14, color="#008069"),
+                        flet.Text(f.name, size=12),
+                        flet.IconButton(
+                            icon=flet.Icons.CLOSE,
+                            icon_size=14,
+                            on_click=lambda e, i=i: _remove_attached_file(i),
+                        ),
+                    ],
+                )
+            )
         page.update()
 
     message_input = flet.TextField(
@@ -246,23 +279,29 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 try:
                     url = f"{API_URL}/rooms/{room.id}/files/{fid}/download"
 
-                    save_path = await file_picker.save_file(file_name=fname, file_type=flet.FilePickerFileType.ANY)
-
-                    if not save_path:
-                        return
-
+                    # Fetch file bytes first
                     async with httpx.AsyncClient() as http:
                         r = await http.get(url, headers=client._headers())
                         r.raise_for_status()
+                        file_bytes = r.content
 
+                    # save_file on Android/iOS/web requires src_bytes
+                    save_path = await file_picker.save_file(
+                        file_name=fname,
+                        file_type=flet.FilePickerFileType.ANY,
+                        src_bytes=file_bytes,
+                    )
+
+                    # On desktop save_path is returned and we write the file ourselves
+                    if save_path:
                         with open(save_path, "wb") as f_save:
-                            f_save.write(r.content)
+                            f_save.write(file_bytes)
 
-                        page.snack_bar = flet.SnackBar(
-                            flet.Text(f"Downloaded {fname}", color="#fff"),
-                            open=True,
-                            bgcolor="#008069",
-                        )
+                    page.snack_bar = flet.SnackBar(
+                        flet.Text(f"Downloaded {fname}", color="#fff"),
+                        open=True,
+                        bgcolor="#008069",
+                    )
                 except Exception as e:
                     page.snack_bar = flet.SnackBar(
                         flet.Text(str(e), color="#fff"),
@@ -271,7 +310,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     )
                 finally:
                     await client.aclose()
-                page.update() # Ensure snackbar is visible
+                page.update()
 
             file_controls.append(
                 flet.Container(
@@ -846,16 +885,23 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 uploaded_files = []
 
                 for f in attached_files:
-                    with open(f.path, "rb") as file_data:
-                        files = {"file": (f.name, file_data)}
-                        async with httpx.AsyncClient() as http:
-                            response = await http.post(
-                                f"{API_URL}/rooms/{room.id}/files",
-                                headers=client._headers(),
-                                files={"file": (f.name, open(f.path, "rb"))},
-                            )
-                            response.raise_for_status()
-                            uploaded_files.append(response.json())
+                    # On Android f.path is None — use f.bytes instead
+                    if f.path:
+                        with open(f.path, "rb") as fh:
+                            file_bytes = fh.read()
+                    elif f.bytes:
+                        file_bytes = f.bytes
+                    else:
+                        continue
+
+                    async with httpx.AsyncClient() as http:
+                        response = await http.post(
+                            f"{API_URL}/rooms/{room.id}/files",
+                            headers=client._headers(),
+                            files={"file": (f.name, file_bytes)},
+                        )
+                        response.raise_for_status()
+                        uploaded_files.append(response.json())
 
                 # Check if this is a personal chat and we should encrypt
                 is_personal = room.room_type == "personal"
