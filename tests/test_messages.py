@@ -10,8 +10,20 @@ from app.models.message import Message
 # Helpers
 # ---------------------------------------------------------------------------
 
+import base64
+
+_ED25519_PUB_B64 = base64.b64encode(b"\x01" * 32).decode()
+_X25519_PUB_B64 = base64.b64encode(b"\x02" * 32).decode()
+_BACKUP_B64 = base64.b64encode(b"\x03" * 64).decode()
+
+
 async def register_and_login(client: AsyncClient, username: str, email: str, password: str) -> str:
-    await client.post("/auth/register", json={"username": username, "email": email, "password": password})
+    await client.post("/auth/register", json={
+        "username": username, "email": email, "password": password,
+        "identity_pub_ed25519": _ED25519_PUB_B64,
+        "identity_pub_x25519": _X25519_PUB_B64,
+        "encrypted_backup": _BACKUP_B64,
+    })
     resp = await client.post("/auth/login", json={"username": username, "password": password})
     return resp.json()["access_token"]
 

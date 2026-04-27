@@ -13,6 +13,8 @@ en:
     error_connect: "Cannot connect to server"
     error_server: "Server error: %{exc}"
     error_unknown: "Unknown server error"
+    error_backup_decrypt: "Incorrect password or corrupted backup"
+    error_backup_corrupted: "Backup decryption error: %{exc}"
 
   register:
     username: "Username"
@@ -22,6 +24,7 @@ en:
     subtitle: "Create a new account"
     have_account: "Already have an account? Login"
     error_server: "Server error: %{exc}"
+    error_crypto: "Cryptographic initialization failed: %{exc}"
 
   profile:
     title: "Profile"

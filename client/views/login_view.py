@@ -48,6 +48,44 @@ def login_view(page: flet.Page, state: AppState) -> None:
                 username_field.value or "", password_field.value or ""
             )
             state.token = token_data["access_token"]
+            
+            # Decrypt backup and recover keys
+            import base64
+            import logging
+            from crypto.key_backup import KeyBackupManager
+            from cryptography.exceptions import InvalidTag
+            
+            encrypted_backup_b64 = token_data.get("encrypted_backup")
+            if encrypted_backup_b64:
+                try:
+                    logging.info("[Login] Decrypting backup...")
+                    encrypted_backup = base64.b64decode(encrypted_backup_b64)
+                    backup_manager = KeyBackupManager()
+                    ed25519_priv, x25519_priv = backup_manager.decrypt_backup(
+                        encrypted_backup,
+                        password_field.value or ""
+                    )
+                    
+                    # Store recovered keys in state
+                    state.ed25519_private = ed25519_priv
+                    state.x25519_private = x25519_priv
+                    logging.info("[Login] Keys recovered and stored in state")
+                except InvalidTag:
+                    error_text.value = t("login.error_backup_decrypt")
+                    error_text.visible = True
+                    submit_btn.disabled = False
+                    loading.visible = False
+                    page.update()
+                    return
+                except Exception as backup_exc:
+                    logging.error(f"[Login] Backup decryption error: {backup_exc}", exc_info=True)
+                    error_text.value = t("login.error_backup_corrupted", exc=backup_exc)
+                    error_text.visible = True
+                    submit_btn.disabled = False
+                    loading.visible = False
+                    page.update()
+                    return
+            
             me = await client.get_me()
             state.current_user = UserDTO(
                 id=me["id"],

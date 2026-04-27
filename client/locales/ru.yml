@@ -13,6 +13,8 @@ ru:
     error_connect: "Не удалось подключиться к серверу"
     error_server: "Ошибка сервера: %{exc}"
     error_unknown: "Неизвестная ошибка сервера"
+    error_backup_decrypt: "Неверный пароль или повреждённая резервная копия"
+    error_backup_corrupted: "Ошибка расшифровки резервной копии: %{exc}"
 
   register:
     username: "Имя пользователя"
@@ -22,6 +24,7 @@ ru:
     subtitle: "Создать новый аккаунт"
     have_account: "Уже есть аккаунт? Войти"
     error_server: "Ошибка сервера: %{exc}"
+    error_crypto: "Ошибка криптографической инициализации: %{exc}"
 
   profile:
     title: "Профиль"

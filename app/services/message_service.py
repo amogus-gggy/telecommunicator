@@ -1,3 +1,6 @@
+import base64
+from datetime import datetime, timezone
+
 from fastapi import HTTPException
 from sqlalchemy import select, desc # Import desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +12,7 @@ from app.models.message import Message
 from app.models.room import Room
 from app.models.room_member import RoomMember
 from app.models.user import User
-from app.schemas.messages import MessageResponse # MessageResponse now includes 'files'
+from app.schemas.messages import MessageResponse, SendMessageResponse  # MessageResponse now includes 'files'
 from app.ws.connection_manager import manager
 
 _DEFAULT_PAGE_SIZE = 50
@@ -194,9 +197,89 @@ async def get_message_history(
                 author_username=author_orm.username,
                 author_display_name=author_orm.display_name,
                 body=msg_orm.body,
+                is_encrypted=msg_orm.is_encrypted,
+                encrypted_blob=base64.b64encode(msg_orm.encrypted_blob).decode() if msg_orm.encrypted_blob else None,
+                signature=base64.b64encode(msg_orm.signature).decode() if msg_orm.signature else None,
                 created_at=msg_orm.created_at,
-                files=message_files, # Populate files field
+                files=message_files,
             )
         )
 
     return message_responses
+
+
+async def send_encrypted_message(
+    db: AsyncSession,
+    sender_id: int,
+    recipient_username: str,
+    room_id: int,
+    encrypted_blob: bytes,
+    signature: bytes,
+) -> SendMessageResponse:
+    """Persist and deliver an E2EE message. Raises HTTPException on failure."""
+    # 1. Resolve recipient by username
+    result = await db.execute(select(User).where(User.username == recipient_username))
+    recipient = result.scalar_one_or_none()
+    if recipient is None:
+        raise HTTPException(status_code=404, detail="Recipient not found")
+
+    # 2. Verify sender is a member of the room
+    membership = await db.execute(
+        select(RoomMember).where(
+            RoomMember.room_id == room_id, RoomMember.user_id == sender_id
+        )
+    )
+    if membership.scalar_one_or_none() is None:
+        raise HTTPException(status_code=403, detail="Not a member of this room")
+
+    # 3. Persist the encrypted message
+    msg = Message(
+        room_id=room_id,
+        author_id=sender_id,
+        encrypted_blob=encrypted_blob,
+        signature=signature,
+        recipient_id=recipient.id,
+        is_encrypted=True,
+    )
+    db.add(msg)
+    await db.commit()
+    await db.refresh(msg)
+
+    # 4. Attempt WebSocket delivery to recipient — include full encrypted payload
+    delivered = False
+    try:
+        # Also look up sender username for the client
+        sender_result = await db.execute(select(User).where(User.id == sender_id))
+        sender = sender_result.scalar_one_or_none()
+        sender_username = sender.username if sender else str(sender_id)
+
+        await manager.send_to_user(
+            recipient.id,
+            {
+                "type": "encrypted_message",
+                "payload": {
+                    "message_id": msg.id,
+                    "sender_id": sender_id,
+                    "sender_username": sender_username,
+                    "room_id": room_id,
+                    "encrypted_blob": base64.b64encode(encrypted_blob).decode(),
+                    "signature": base64.b64encode(signature).decode(),
+                    "is_encrypted": True,
+                    "created_at": msg.created_at.isoformat(),
+                },
+            },
+        )
+        delivered = True
+    except Exception:
+        delivered = False
+
+    # 5. If delivered, stamp delivered_at and commit
+    if delivered:
+        msg.delivered_at = datetime.now(timezone.utc)
+        await db.commit()
+
+    return SendMessageResponse(
+        message_id=msg.id,
+        created_at=msg.created_at,
+        delivered=delivered,
+    )

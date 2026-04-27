@@ -5,6 +5,9 @@ from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from api.ws_client import WsClient, NotificationClient
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+    from crypto.key_cache import PublicKeyCache
 
 
 @dataclass
@@ -39,6 +42,16 @@ class AppState:
     notif_ws: "NotificationClient | None" = field(default=None, repr=False)
     # Callback invoked when message_alignment changes (set by room_view)
     on_alignment_change: "Callable[[str], None] | None" = field(default=None, repr=False)
+    # E2EE cryptographic keys
+    ed25519_private: "Ed25519PrivateKey | None" = field(default=None, repr=False)
+    x25519_private: "X25519PrivateKey | None" = field(default=None, repr=False)
+    old_x25519_private: "X25519PrivateKey | None" = field(default=None, repr=False)  # For key rotation grace period
+    public_key_cache: "PublicKeyCache | None" = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.public_key_cache is None:
+            from crypto.key_cache import PublicKeyCache
+            self.public_key_cache = PublicKeyCache()
 
     def __setattr__(self, name: str, value: object) -> None:
         object.__setattr__(self, name, value)
@@ -61,3 +74,11 @@ class AppState:
         if self.notif_ws is not None:
             self.notif_ws.close()
             self.notif_ws = None
+
+    def clear_crypto_keys(self) -> None:
+        """Clear cryptographic keys from memory."""
+        self.ed25519_private = None
+        self.x25519_private = None
+        self.old_x25519_private = None
+        if self.public_key_cache is not None:
+            self.public_key_cache.clear()

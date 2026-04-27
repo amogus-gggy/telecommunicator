@@ -409,12 +409,164 @@ def room_view(page: flet.Page, state: AppState) -> None:
         # We track this via on_scroll event
         return _state.get("user_at_bottom", True)
 
+    async def _decrypt_message_if_needed(msg: dict) -> dict:
+        """Decrypt message if it's encrypted, otherwise return as-is."""
+        if not msg.get("is_encrypted"):
+            return msg
+        
+        # Message is encrypted, attempt to decrypt
+        import base64
+        import logging
+        from crypto.message_crypto import MessageDecryptor
+        from crypto.key_generator import KeyGenerator
+        from cryptography.exceptions import InvalidSignature, InvalidTag
+        
+        try:
+            if not state.x25519_private or not state.ed25519_private:
+                logging.warning("[DECRYPT] No private keys available")
+                msg["body"] = "🔒 [Encrypted message - keys not available]"
+                msg["decryption_error"] = True
+                return msg
+            
+            # Get sender public keys
+            sender_username = msg.get("author_username")
+            if not sender_username:
+                logging.warning("[DECRYPT] No sender username in message")
+                msg["body"] = "🔒 [Encrypted message - sender unknown]"
+                msg["decryption_error"] = True
+                return msg
+            
+            sender_keys = None
+            if state.public_key_cache:
+                sender_keys = state.public_key_cache.get_public_keys(sender_username)
+            
+            if not sender_keys:
+                logging.info(f"[DECRYPT] Fetching public keys for {sender_username}")
+                client = APIClient(base_url=API_URL, state=state)
+                try:
+                    keys_data = await client.get_public_keys(sender_username)
+                    ed25519_pub_bytes = base64.b64decode(keys_data["identity_pub_ed25519"])
+                    x25519_pub_bytes = base64.b64decode(keys_data["identity_pub_x25519"])
+                    
+                    ed25519_pub = KeyGenerator.load_ed25519_public_key(ed25519_pub_bytes)
+                    x25519_pub = KeyGenerator.load_x25519_public_key(x25519_pub_bytes)
+                    
+                    sender_keys = {"ed25519_pub": ed25519_pub, "x25519_pub": x25519_pub}
+                    if state.public_key_cache:
+                        state.public_key_cache.set_public_keys(sender_username, ed25519_pub, x25519_pub)
+                finally:
+                    await client.aclose()
+            
+            # Decrypt message
+            encrypted_blob = msg.get("encrypted_blob")
+            signature = msg.get("signature")
+            
+            if not encrypted_blob or not signature:
+                logging.warning("[DECRYPT] Missing encrypted_blob or signature")
+                msg["body"] = "🔒 [Encrypted message - malformed]"
+                msg["decryption_error"] = True
+                return msg
+            
+            logging.info(f"[DECRYPT] Decrypting message from {sender_username}")
+            decryptor = MessageDecryptor()
+            encrypted_data = {
+                "blob": encrypted_blob,
+                "signature": signature
+            }
+            
+            plaintext = decryptor.decrypt_message(
+                encrypted_msg=encrypted_data,
+                recipient_x25519_priv=state.x25519_private,
+                sender_ed25519_pub=sender_keys["ed25519_pub"]
+            )
+            
+            msg["body"] = plaintext
+            msg["decrypted"] = True
+            logging.info(f"[DECRYPT] Message decrypted successfully")
+            return msg
+            
+        except InvalidSignature:
+            logging.error(f"[DECRYPT] Signature verification failed for message from {sender_username}")
+            msg["body"] = "⚠️ [Security warning: Message signature invalid]"
+            msg["signature_error"] = True
+            return msg
+        except InvalidTag:
+            logging.error(f"[DECRYPT] Decryption failed for message from {sender_username}")
+            msg["body"] = "🔒 [Decryption error: Invalid key or tampered message]"
+            msg["decryption_error"] = True
+            return msg
+        except Exception as exc:
+            logging.error(f"[DECRYPT] Unexpected error: {exc}", exc_info=True)
+            msg["body"] = f"🔒 [Decryption error: {exc}]"
+            msg["decryption_error"] = True
+            return msg
+
     def _on_ws_message(payload: dict) -> None:
         print(f"[WS] Received raw payload: {payload}") # Log raw payload
         if payload.get("type") == "message":
             msg = payload.get("payload", payload)
             print(f"[WS] Processed message payload: {msg}") # Log processed message
             print(f"[WS] Files section in message: {msg.get('files', [])}") # Log files section
+
+            # Decrypt message if encrypted
+            if msg.get("is_encrypted"):
+                print(f"[WS] Message is encrypted, decrypting...")
+                # Run decryption in async task
+                async def decrypt_and_display():
+                    decrypted_msg = await _decrypt_message_if_needed(msg)
+                    
+                    # Check if this is our own message (optimistic update already shown)
+                    is_own_message = (
+                        state.current_user is not None
+                        and decrypted_msg.get("author_username") == state.current_user.username
+                    )
+                    
+                    # Check if we already have this message (by temporary ID or real ID)
+                    msg_id = decrypted_msg.get("id")
+                    temp_id = decrypted_msg.get("temp_id")
+                    already_exists = False
+                    
+                    if is_own_message:
+                        # Look for temporary message with matching temp_id or body
+                        for i, existing_msg in enumerate(_state["messages_data"]):
+                            if existing_msg.get("temp_id") == temp_id or (
+                                existing_msg.get("is_optimistic") and 
+                                existing_msg.get("body") == decrypted_msg.get("body")
+                            ):
+                                # Replace optimistic message with real one
+                                _state["messages_data"][i] = decrypted_msg
+                                messages_list.controls[i] = _build_message_tile(decrypted_msg)
+                                already_exists = True
+                                print(f"[WS] Replaced optimistic message with real one")
+                                break
+                    
+                    if not already_exists:
+                        user_at_bottom = _is_user_at_bottom()
+                        print(f"[WS] User at bottom: {user_at_bottom}")
+
+                        _state["messages_data"].append(decrypted_msg)
+                        message_control = _build_message_tile(decrypted_msg)
+                        messages_list.controls.append(message_control)
+                        print(f"[WS] Added message to list, total messages: {len(messages_list.controls)}")
+                        
+                        reconnecting_banner.visible = False
+                        _animate_message(message_control)
+                        print(f"[WS] Animated message")
+                    
+                    page.update()
+                    print(f"[WS] Updated page")
+                    
+                    # Only scroll to bottom if user was already at bottom
+                    if not already_exists:
+                        user_at_bottom = _is_user_at_bottom()
+                        if user_at_bottom:
+                            print(f"[WS] Scrolling to bottom...")
+                            page.run_task(_smooth_scroll_to_bottom)
+                        else:
+                            print(f"[WS] Not scrolling - user not at bottom")
+                
+                page.run_task(decrypt_and_display)
+                return
 
             # Check if this is our own message (optimistic update already shown)
             is_own_message = (
@@ -512,12 +664,22 @@ def room_view(page: flet.Page, state: AppState) -> None:
         msgs_sorted = sorted(msgs, key=lambda m: m["id"])
         print(f"[INIT] Loaded {len(msgs_sorted)} messages")
         
-        if msgs_sorted:
-            _state["min_id"] = msgs_sorted[0]["id"]
-            _state["messages_data"] = msgs_sorted
-            for m in msgs_sorted:
+        # Decrypt encrypted messages
+        decrypted_msgs = []
+        for m in msgs_sorted:
+            if m.get("is_encrypted"):
+                print(f"[INIT] Decrypting message {m.get('id')}")
+                decrypted_msg = await _decrypt_message_if_needed(m)
+                decrypted_msgs.append(decrypted_msg)
+            else:
+                decrypted_msgs.append(m)
+        
+        if decrypted_msgs:
+            _state["min_id"] = decrypted_msgs[0]["id"]
+            _state["messages_data"] = decrypted_msgs
+            for m in decrypted_msgs:
                 messages_list.controls.append(_build_message_tile(m))
-            print(f"[INIT] Added {len(msgs_sorted)} messages to UI")
+            print(f"[INIT] Added {len(decrypted_msgs)} messages to UI")
         
         page.update()
         print(f"[INIT] Updated page, now scrolling to bottom...")
@@ -534,10 +696,21 @@ def room_view(page: flet.Page, state: AppState) -> None:
         msgs = await _load_messages(before_id=_state["min_id"])
         if msgs:
             msgs_sorted = sorted(msgs, key=lambda m: m["id"])
-            _state["min_id"] = msgs_sorted[0]["id"]
-            new_tiles = [_build_message_tile(m) for m in msgs_sorted]
+            
+            # Decrypt encrypted messages
+            decrypted_msgs = []
+            for m in msgs_sorted:
+                if m.get("is_encrypted"):
+                    print(f"[LOAD_OLDER] Decrypting message {m.get('id')}")
+                    decrypted_msg = await _decrypt_message_if_needed(m)
+                    decrypted_msgs.append(decrypted_msg)
+                else:
+                    decrypted_msgs.append(m)
+            
+            _state["min_id"] = decrypted_msgs[0]["id"]
+            new_tiles = [_build_message_tile(m) for m in decrypted_msgs]
             # Insert older messages at the top (data too)
-            _state["messages_data"] = msgs_sorted + _state["messages_data"]
+            _state["messages_data"] = decrypted_msgs + _state["messages_data"]
             messages_list.controls = new_tiles + messages_list.controls
             page.update()
             # Scroll to the first of the previously visible messages to keep reading position
@@ -546,6 +719,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     scroll_key=new_tiles[-1],
                     duration=0,
                 )
+        _state["loading_older"] = False
         _state["loading_older"] = False
 
     async def _send_message() -> None:
@@ -598,8 +772,8 @@ def room_view(page: flet.Page, state: AppState) -> None:
             # Scroll to bottom
             page.run_task(_smooth_scroll_to_bottom)
             
-            # Send message via WebSocket
-            print(f"[SEND] Sending message via WebSocket...")
+            # Send message via WebSocket or encrypted API
+            print(f"[SEND] Sending message...")
             client = APIClient(base_url=API_URL, state=state)
 
             try:
@@ -618,9 +792,75 @@ def room_view(page: flet.Page, state: AppState) -> None:
                             response.raise_for_status()
                             uploaded_files.append(response.json())
 
-                # Send message with file metadata
-                print(f"[SEND] Sending message with files: {uploaded_files}")
-                await ws.send_message(room.id, resolved_body, files=uploaded_files)
+                # Check if this is a personal chat and we should encrypt
+                is_personal = room.room_type == "personal"
+                should_encrypt = False
+                recipient_username = None
+                
+                if is_personal and state.ed25519_private and state.x25519_private:
+                    # Extract recipient username from room name
+                    # Personal chat names are formatted as "user1, user2"
+                    parts = room.name.split(", ")
+                    recipient_username = next((p for p in parts if p != state.current_user.username), None)
+                    
+                    if recipient_username:
+                        print(f"[SEND] Personal chat detected, attempting E2EE with {recipient_username}")
+                        should_encrypt = True
+                
+                if should_encrypt and recipient_username:
+                    try:
+                        import base64
+                        import logging
+                        from crypto.message_crypto import MessageEncryptor
+                        from crypto.key_generator import KeyGenerator
+                        
+                        # Fetch recipient public keys
+                        recipient_keys = None
+                        if state.public_key_cache:
+                            recipient_keys = state.public_key_cache.get_public_keys(recipient_username)
+                        
+                        if not recipient_keys:
+                            logging.info(f"[SEND] Fetching public keys for {recipient_username}")
+                            keys_data = await client.get_public_keys(recipient_username)
+                            ed25519_pub_bytes = base64.b64decode(keys_data["identity_pub_ed25519"])
+                            x25519_pub_bytes = base64.b64decode(keys_data["identity_pub_x25519"])
+                            
+                            ed25519_pub = KeyGenerator.load_ed25519_public_key(ed25519_pub_bytes)
+                            x25519_pub = KeyGenerator.load_x25519_public_key(x25519_pub_bytes)
+                            
+                            recipient_keys = {"ed25519_pub": ed25519_pub, "x25519_pub": x25519_pub}
+                            if state.public_key_cache:
+                                state.public_key_cache.set_public_keys(recipient_username, ed25519_pub, x25519_pub)
+                        
+                        # Encrypt message
+                        logging.info(f"[SEND] Encrypting message for {recipient_username}")
+                        encryptor = MessageEncryptor()
+                        encrypted_data = encryptor.encrypt_message(
+                            plaintext=resolved_body,
+                            recipient_x25519_pub=recipient_keys["x25519_pub"],
+                            sender_ed25519_priv=state.ed25519_private,
+                            sender_id=str(state.current_user.id),
+                            recipient_id=str(keys_data.get("user_id", ""))
+                        )
+                        
+                        # Send encrypted message via API
+                        logging.info(f"[SEND] Sending encrypted message via API")
+                        await client.send_encrypted_message(
+                            room_id=room.id,
+                            recipient_username=recipient_username,
+                            encrypted_blob_b64=encrypted_data["blob"],
+                            signature_b64=encrypted_data["signature"]
+                        )
+                        logging.info(f"[SEND] Encrypted message sent successfully")
+                    except Exception as enc_exc:
+                        logging.error(f"[SEND] Encryption failed: {enc_exc}", exc_info=True)
+                        print(f"[SEND] Encryption failed, falling back to plaintext: {enc_exc}")
+                        # Fall back to plaintext WebSocket
+                        await ws.send_message(room.id, resolved_body, files=uploaded_files)
+                else:
+                    # Send plaintext via WebSocket (group chat or no keys)
+                    print(f"[SEND] Sending plaintext message via WebSocket")
+                    await ws.send_message(room.id, resolved_body, files=uploaded_files)
 
                 # re-render
                 if attached_files:

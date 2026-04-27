@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from app.db.base import Base
 from app.db.deps import get_db
 from app.routers import auth as auth_router
+from app.routers import backup as backup_router
 from app.routers import rooms as rooms_router
 from app.routers import messages as messages_router
 from app.routers import users as users_router
@@ -64,6 +65,7 @@ async def client(test_db: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     test_app.include_router(rooms_router.router)
     test_app.include_router(messages_router.router)
     test_app.include_router(users_router.router)
+    test_app.include_router(backup_router.router)
     test_app.dependency_overrides[get_db] = override_get_db
     
     async with AsyncClient(

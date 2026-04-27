@@ -157,7 +157,14 @@ async def test_register_raises_conflict_on_409():
 
     client._client = httpx.AsyncClient(base_url="http://localhost:8000", transport=MockTransport(handler))
     with pytest.raises(ConflictError) as exc_info:
-        await client.register("alice", "a@b.com", "password123")
+        await client.register(
+            "alice", 
+            "a@b.com", 
+            "password123",
+            "dummy_ed25519_pub_b64",
+            "dummy_x25519_pub_b64",
+            "dummy_encrypted_backup_b64"
+        )
     assert "Username already exists" in exc_info.value.message
     await client.aclose()
 
