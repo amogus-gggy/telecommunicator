@@ -20,6 +20,8 @@ from cryptography.hazmat.primitives.serialization import (
     PublicFormat,
 )
 
+from state import AppState
+
 
 class KeyGenerator:
     """Generates and serializes cryptographic key pairs for E2EE messaging."""
