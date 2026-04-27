@@ -51,7 +51,7 @@ async def upload_file(room_id: int, user, file: UploadFile, db: AsyncSession):
                     if not chunk:
                         break
                     f.write(chunk)
-        except Exception as e:
+        except Exception:
             print("[UPLOAD ERROR] Failed during file write:")
             traceback.print_exc()
             raise HTTPException(500, "Failed to save file")

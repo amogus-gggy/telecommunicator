@@ -1,7 +1,6 @@
 """Unit tests for the _on_notification handler logic in chat list view."""
 from __future__ import annotations
 
-import pytest
 
 
 def _make_notification_handler():

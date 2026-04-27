@@ -18,11 +18,11 @@ def room_view(page: flet.Page, state: AppState) -> None:
     room = state.active_room
     print(f"[room_view] entered, room={room}")
     if room is None:
-        print(f"[room_view] room is None, returning early")
+        print("[room_view] room is None, returning early")
         return
 
     page.bgcolor = "#efeae2"
-    print(f"[room_view] creating widgets...")
+    print("[room_view] creating widgets...")
 
     messages_list = flet.ListView(
         expand=True,
@@ -94,7 +94,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         border_color=flet.Colors.TRANSPARENT,
         color=flet.Colors.BLACK
     )
-    print(f"[room_view] message_input ok")
+    print("[room_view] message_input ok")
 
     reconnecting_banner = flet.Container(
         content=flet.Text(
@@ -109,7 +109,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         border_radius=4,
         alignment=flet.alignment.Alignment(0, 0),
     )
-    print(f"[room_view] reconnecting_banner ok")
+    print("[room_view] reconnecting_banner ok")
 
     _state: dict = {"min_id": None, "loading_older": False, "ws_client": None, "user_at_bottom": True, "messages_data": []}
 
@@ -124,7 +124,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
     )
 
     page.overlay.append(_profile_sheet)
-    print(f"[room_view] profile_sheet ok")
+    print("[room_view] profile_sheet ok")
 
     # Emoji picker callbacks
     def _on_emoji_selected(emoji_char: str) -> None:
@@ -142,13 +142,13 @@ def room_view(page: flet.Page, state: AppState) -> None:
         page.update()
 
     # Create emoji picker
-    print(f"[room_view] creating EmojiPicker...")
+    print("[room_view] creating EmojiPicker...")
     emoji_picker = EmojiPicker(
         on_emoji_selected=_on_emoji_selected,
         on_close=_on_emoji_picker_close,
     )
     page.overlay.append(emoji_picker)
-    print(f"[room_view] EmojiPicker ok")
+    print("[room_view] EmojiPicker ok")
 
     def _toggle_emoji_picker(e: flet.ControlEvent) -> None:
         """Toggle emoji picker visibility."""
@@ -432,7 +432,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
     async def _smooth_scroll_to_bottom() -> None:
         """Smoothly scroll to the bottom of the chat area."""
-        print(f"[SCROLL] Starting smooth scroll to bottom...")
+        print("[SCROLL] Starting smooth scroll to bottom...")
         # Small delay to ensure UI is rendered
         import asyncio
         await asyncio.sleep(0.1)
@@ -441,7 +441,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
             duration=400,
             curve=flet.AnimationCurve.EASE_OUT,
         )
-        print(f"[SCROLL] Smooth scroll completed")
+        print("[SCROLL] Smooth scroll completed")
 
     def _is_user_at_bottom() -> bool:
         """Check if user is scrolled near the bottom of the chat."""
@@ -547,7 +547,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
             
             msg["body"] = plaintext
             msg["decrypted"] = True
-            logging.info(f"[DECRYPT] Message decrypted successfully")
+            logging.info("[DECRYPT] Message decrypted successfully")
             return msg
             
         except InvalidSignature:
@@ -613,7 +613,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
             # Decrypt message if encrypted
             if msg.get("is_encrypted"):
-                print(f"[WS] Message is encrypted, decrypting...")
+                print("[WS] Message is encrypted, decrypting...")
                 # Run decryption in async task
                 async def decrypt_and_display():
                     decrypted_msg = await _decrypt_message_if_needed(msg)
@@ -641,7 +641,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                                 _state["messages_data"][i] = decrypted_msg
                                 messages_list.controls[i] = _build_message_tile(decrypted_msg)
                                 already_exists = True
-                                print(f"[WS] Replaced optimistic message with real one")
+                                print("[WS] Replaced optimistic message with real one")
                                 break
                     
                     if not already_exists:
@@ -655,19 +655,19 @@ def room_view(page: flet.Page, state: AppState) -> None:
                         
                         reconnecting_banner.visible = False
                         _animate_message(message_control)
-                        print(f"[WS] Animated message")
+                        print("[WS] Animated message")
                     
                     page.update()
-                    print(f"[WS] Updated page")
+                    print("[WS] Updated page")
                     
                     # Only scroll to bottom if user was already at bottom
                     if not already_exists:
                         user_at_bottom = _is_user_at_bottom()
                         if user_at_bottom:
-                            print(f"[WS] Scrolling to bottom...")
+                            print("[WS] Scrolling to bottom...")
                             page.run_task(_smooth_scroll_to_bottom)
                         else:
-                            print(f"[WS] Not scrolling - user not at bottom")
+                            print("[WS] Not scrolling - user not at bottom")
                 
                 page.run_task(decrypt_and_display)
                 return
@@ -694,7 +694,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                         _state["messages_data"][i] = msg
                         messages_list.controls[i] = _build_message_tile(msg)
                         already_exists = True
-                        print(f"[WS] Replaced optimistic message with real one")
+                        print("[WS] Replaced optimistic message with real one")
                         break
             
             if not already_exists:
@@ -708,19 +708,19 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 
                 reconnecting_banner.visible = False
                 _animate_message(message_control)
-                print(f"[WS] Animated message")
+                print("[WS] Animated message")
             
             page.update()
-            print(f"[WS] Updated page")
+            print("[WS] Updated page")
             
             # Only scroll to bottom if user was already at bottom
             if not already_exists:
                 user_at_bottom = _is_user_at_bottom()
                 if user_at_bottom:
-                    print(f"[WS] Scrolling to bottom...")
+                    print("[WS] Scrolling to bottom...")
                     page.run_task(_smooth_scroll_to_bottom)
                 else:
-                    print(f"[WS] Not scrolling - user not at bottom")
+                    print("[WS] Not scrolling - user not at bottom")
 
     def _on_reconnecting(delay: float) -> None:
         reconnecting_banner.visible = True
@@ -750,7 +750,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
             await client.aclose()
 
     async def _initial_load() -> None:
-        print(f"[INIT] Starting initial message load...")
+        print("[INIT] Starting initial message load...")
 
         # Auto-join public rooms if not already a member
         if room.room_type == "public":
@@ -786,12 +786,12 @@ def room_view(page: flet.Page, state: AppState) -> None:
             print(f"[INIT] Added {len(decrypted_msgs)} messages to UI")
         
         page.update()
-        print(f"[INIT] Updated page, now scrolling to bottom...")
+        print("[INIT] Updated page, now scrolling to bottom...")
         
         # Ensure user is marked as at bottom for initial load
         _state["user_at_bottom"] = True
         await _smooth_scroll_to_bottom()
-        print(f"[INIT] Initial load complete")
+        print("[INIT] Initial load complete")
 
     async def _load_older() -> None:
         if _state["loading_older"] or _state["min_id"] is None:
@@ -834,15 +834,15 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
         print(f"[SEND] Attempting to send message: '{body}'")
         if not body and not attached_files:
-            print(f"[SEND] Empty message, aborting")
+            print("[SEND] Empty message, aborting")
             return
         ws: WsClient | None = _state.get("ws_client")
         if ws is None:
-            print(f"[SEND] No WebSocket client available")
+            print("[SEND] No WebSocket client available")
             return
         try:
             # Mark user as "at bottom" when sending a message
-            print(f"[SEND] Setting user_at_bottom = True")
+            print("[SEND] Setting user_at_bottom = True")
             _state["user_at_bottom"] = True
             
             # Resolve emoji shortcodes before sending
@@ -870,14 +870,14 @@ def room_view(page: flet.Page, state: AppState) -> None:
             
             # Clear input and update UI
             message_input.value = ""
-            print(f"[SEND] Cleared input field and added optimistic message")
+            print("[SEND] Cleared input field and added optimistic message")
             page.update()
             
             # Scroll to bottom
             page.run_task(_smooth_scroll_to_bottom)
             
             # Send message via WebSocket or encrypted API
-            print(f"[SEND] Sending message...")
+            print("[SEND] Sending message...")
             client = APIClient(base_url=API_URL, state=state)
 
             try:
@@ -959,7 +959,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                         )
                         
                         # Send encrypted message via API
-                        logging.info(f"[SEND] Sending encrypted message via API")
+                        logging.info("[SEND] Sending encrypted message via API")
                         await client.send_encrypted_message(
                             room_id=room.id,
                             recipient_username=recipient_username,
@@ -968,7 +968,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                             signature_b64=encrypted_data["signature"],
                             file_ids=[f["id"] for f in uploaded_files if f.get("id")],
                         )
-                        logging.info(f"[SEND] Encrypted message sent successfully")
+                        logging.info("[SEND] Encrypted message sent successfully")
                     except Exception as enc_exc:
                         logging.error(f"[SEND] Encryption failed: {enc_exc}", exc_info=True)
                         print(f"[SEND] Encryption failed, falling back to plaintext: {enc_exc}")
@@ -976,7 +976,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                         await ws.send_message(room.id, resolved_body, files=uploaded_files)
                 else:
                     # Send plaintext via WebSocket (group chat or no keys)
-                    print(f"[SEND] Sending plaintext message via WebSocket")
+                    print("[SEND] Sending plaintext message via WebSocket")
                     await ws.send_message(room.id, resolved_body, files=uploaded_files)
 
                 # re-render
@@ -993,7 +993,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
             finally:
                 await client.aclose()
-            print(f"[SEND] Message sent")
+            print("[SEND] Message sent")
         except Exception as exc:
             print(f"[SEND] Error sending message: {exc}")
             page.snack_bar = flet.SnackBar(flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335")
@@ -1192,7 +1192,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
     )
 
     # Create formatting toolbar
-    print(f"[room_view] creating FormattingToolbar...")
+    print("[room_view] creating FormattingToolbar...")
     formatting_toolbar = FormattingToolbar(
         get_value=lambda: message_input.value or "",
         set_value=lambda v: setattr(message_input, 'value', v),  # No need for page.update()
@@ -1200,10 +1200,10 @@ def room_view(page: flet.Page, state: AppState) -> None:
         text_field=message_input,  # Pass TextField reference for selection support
         disabled=False,  # For now, use False since there's no read-only state
     )
-    print(f"[room_view] FormattingToolbar ok")
+    print("[room_view] FormattingToolbar ok")
 
     page.controls.clear()
-    print(f"[room_view] controls cleared, building UI...")
+    print("[room_view] controls cleared, building UI...")
     page.add(
         flet.Column(
             controls=[
@@ -1259,6 +1259,6 @@ def room_view(page: flet.Page, state: AppState) -> None:
         )
     )
     page.update()
-    print(f"[room_view] page.update() done, starting tasks...")
+    print("[room_view] page.update() done, starting tasks...")
     page.run_task(_initial_load)
     page.run_task(_start_ws)

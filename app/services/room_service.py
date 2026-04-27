@@ -1,5 +1,5 @@
 from fastapi import HTTPException
-from sqlalchemy import func, select, and_, or_
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.room import Room, RoomType

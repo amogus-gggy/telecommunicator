@@ -6,7 +6,6 @@ from sqlalchemy import select, desc # Import desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload # Import selectinload
 
-from app.db.base import Base # Assuming Base is imported correctly
 from app.models.file import File # Import File model
 from app.models.message import Message
 from app.models.room import Room
@@ -85,9 +84,9 @@ async def send_message(
             else:
                 print(f"Warning: File metadata missing 'id' field: {file_data}")
         await db.commit() # Commit file associations
-        print(f"[SEND_MESSAGE] Files associated with message")
+        print("[SEND_MESSAGE] Files associated with message")
     else:
-        print(f"[SEND_MESSAGE] No files to process")
+        print("[SEND_MESSAGE] No files to process")
 
     # Fetch message and its associated files for the response
     # Use selectinload to eager load the 'files' relationship

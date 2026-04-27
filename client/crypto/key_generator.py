@@ -96,7 +96,6 @@ class KeyGenerator:
         Returns:
             Tuple of (new_private_key, new_public_key)
         """
-        from state import AppState
         
         # Store old private key for grace period
         if state.x25519_private:
