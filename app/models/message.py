@@ -25,6 +25,7 @@ class Message(Base):
 
     # E2EE fields
     encrypted_blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    sender_encrypted_blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     signature: Mapped[bytes | None] = mapped_column(LargeBinary(64), nullable=True)
     recipient_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True

@@ -129,6 +129,13 @@ ru:
     username_label: "Имя пользователя: %{username}"
     display_name_label: "Отображаемое имя: %{name}"
     close: "Закрыть"
+    encrypted_sent: "🔒 Зашифрованное сообщение"
+    encrypted_no_keys: "🔒 [Зашифрованное сообщение — ключи недоступны]"
+    encrypted_unknown_sender: "🔒 [Зашифрованное сообщение — отправитель неизвестен]"
+    encrypted_malformed: "🔒 [Зашифрованное сообщение — повреждено]"
+    encrypted_bad_signature: "⚠️ [Предупреждение безопасности: подпись сообщения недействительна]"
+    encrypted_bad_key: "🔒 [Ошибка расшифровки: неверный ключ или сообщение изменено]"
+    encrypted_error: "🔒 [Ошибка расшифровки: %{exc}]"
 
   room_settings:
     title: "Настройки комнаты — %{name}"

@@ -414,6 +414,32 @@ def room_view(page: flet.Page, state: AppState) -> None:
         if not msg.get("is_encrypted"):
             return msg
         
+        # If current user is the sender, decrypt using the sender's own copy
+        if (
+            state.current_user is not None
+            and msg.get("author_username") == state.current_user.username
+        ):
+            sender_blob = msg.get("sender_encrypted_blob")
+            if not sender_blob:
+                # Old message without sender copy — just show placeholder
+                if not msg.get("body"):
+                    msg["body"] = t("room.encrypted_sent")
+                return msg
+
+            import base64
+            import logging
+            from crypto.message_crypto import MessageDecryptor
+            from cryptography.exceptions import InvalidTag
+
+            try:
+                decryptor = MessageDecryptor()
+                msg["body"] = decryptor.decrypt_own_message(sender_blob, state.x25519_private)
+                msg["decrypted"] = True
+            except (InvalidTag, Exception) as exc:
+                logging.error(f"[DECRYPT] Failed to decrypt own message: {exc}")
+                msg["body"] = t("room.encrypted_sent")
+            return msg
+        
         # Message is encrypted, attempt to decrypt
         import base64
         import logging
@@ -424,7 +450,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         try:
             if not state.x25519_private or not state.ed25519_private:
                 logging.warning("[DECRYPT] No private keys available")
-                msg["body"] = "🔒 [Encrypted message - keys not available]"
+                msg["body"] = t("room.encrypted_no_keys")
                 msg["decryption_error"] = True
                 return msg
             
@@ -432,7 +458,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
             sender_username = msg.get("author_username")
             if not sender_username:
                 logging.warning("[DECRYPT] No sender username in message")
-                msg["body"] = "🔒 [Encrypted message - sender unknown]"
+                msg["body"] = t("room.encrypted_unknown_sender")
                 msg["decryption_error"] = True
                 return msg
             
@@ -463,7 +489,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
             
             if not encrypted_blob or not signature:
                 logging.warning("[DECRYPT] Missing encrypted_blob or signature")
-                msg["body"] = "🔒 [Encrypted message - malformed]"
+                msg["body"] = t("room.encrypted_malformed")
                 msg["decryption_error"] = True
                 return msg
             
@@ -487,23 +513,60 @@ def room_view(page: flet.Page, state: AppState) -> None:
             
         except InvalidSignature:
             logging.error(f"[DECRYPT] Signature verification failed for message from {sender_username}")
-            msg["body"] = "⚠️ [Security warning: Message signature invalid]"
+            msg["body"] = t("room.encrypted_bad_signature")
             msg["signature_error"] = True
             return msg
         except InvalidTag:
             logging.error(f"[DECRYPT] Decryption failed for message from {sender_username}")
-            msg["body"] = "🔒 [Decryption error: Invalid key or tampered message]"
+            msg["body"] = t("room.encrypted_bad_key")
             msg["decryption_error"] = True
             return msg
         except Exception as exc:
             logging.error(f"[DECRYPT] Unexpected error: {exc}", exc_info=True)
-            msg["body"] = f"🔒 [Decryption error: {exc}]"
+            msg["body"] = t("room.encrypted_error", exc=exc)
             msg["decryption_error"] = True
             return msg
 
     def _on_ws_message(payload: dict) -> None:
         print(f"[WS] Received raw payload: {payload}") # Log raw payload
-        if payload.get("type") == "message":
+
+        msg_type = payload.get("type")
+
+        # Handle encrypted_message delivered directly to recipient via user-level WS
+        if msg_type == "encrypted_message":
+            raw = payload.get("payload", payload)
+            # Normalise field names to match the standard message format
+            msg: dict = {
+                "id": raw.get("message_id") or raw.get("id"),
+                "room_id": raw.get("room_id"),
+                "author_username": raw.get("sender_username") or raw.get("author_username"),
+                "author_display_name": raw.get("author_display_name"),
+                "body": "",
+                "created_at": raw.get("created_at", ""),
+                "files": raw.get("files", []),
+                "is_encrypted": True,
+                "encrypted_blob": raw.get("encrypted_blob"),
+                "signature": raw.get("signature"),
+            }
+            # Only display if this message belongs to the currently open room
+            if msg["room_id"] != room.id:
+                return
+
+            async def decrypt_and_display_encrypted():
+                decrypted_msg = await _decrypt_message_if_needed(msg)
+                _state["messages_data"].append(decrypted_msg)
+                message_control = _build_message_tile(decrypted_msg)
+                messages_list.controls.append(message_control)
+                reconnecting_banner.visible = False
+                _animate_message(message_control)
+                page.update()
+                if _is_user_at_bottom():
+                    page.run_task(_smooth_scroll_to_bottom)
+
+            page.run_task(decrypt_and_display_encrypted)
+            return
+
+        if msg_type == "message":
             msg = payload.get("payload", payload)
             print(f"[WS] Processed message payload: {msg}") # Log processed message
             print(f"[WS] Files section in message: {msg.get('files', [])}") # Log files section
@@ -529,10 +592,11 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     if is_own_message:
                         # Look for temporary message with matching temp_id or body
                         for i, existing_msg in enumerate(_state["messages_data"]):
-                            if existing_msg.get("temp_id") == temp_id or (
-                                existing_msg.get("is_optimistic") and 
-                                existing_msg.get("body") == decrypted_msg.get("body")
-                            ):
+                            if existing_msg.get("temp_id") == temp_id or existing_msg.get("is_optimistic"):
+                                # Keep the original body from the optimistic message (encrypted
+                                # outgoing messages can't be decrypted by the sender)
+                                if decrypted_msg.get("is_encrypted"):
+                                    decrypted_msg["body"] = existing_msg.get("body", decrypted_msg.get("body", ""))
                                 # Replace optimistic message with real one
                                 _state["messages_data"][i] = decrypted_msg
                                 messages_list.controls[i] = _build_message_tile(decrypted_msg)
@@ -816,6 +880,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                         
                         # Fetch recipient public keys
                         recipient_keys = None
+                        keys_data = None
                         if state.public_key_cache:
                             recipient_keys = state.public_key_cache.get_public_keys(recipient_username)
                         
@@ -828,9 +893,11 @@ def room_view(page: flet.Page, state: AppState) -> None:
                             ed25519_pub = KeyGenerator.load_ed25519_public_key(ed25519_pub_bytes)
                             x25519_pub = KeyGenerator.load_x25519_public_key(x25519_pub_bytes)
                             
-                            recipient_keys = {"ed25519_pub": ed25519_pub, "x25519_pub": x25519_pub}
+                            recipient_keys = {"ed25519_pub": ed25519_pub, "x25519_pub": x25519_pub, "user_id": keys_data.get("user_id", "")}
                             if state.public_key_cache:
-                                state.public_key_cache.set_public_keys(recipient_username, ed25519_pub, x25519_pub)
+                                state.public_key_cache.set_public_keys(recipient_username, ed25519_pub, x25519_pub, str(keys_data.get("user_id", "")))
+                        
+                        recipient_id = str(recipient_keys.get("user_id", "") if isinstance(recipient_keys, dict) else "")
                         
                         # Encrypt message
                         logging.info(f"[SEND] Encrypting message for {recipient_username}")
@@ -839,8 +906,9 @@ def room_view(page: flet.Page, state: AppState) -> None:
                             plaintext=resolved_body,
                             recipient_x25519_pub=recipient_keys["x25519_pub"],
                             sender_ed25519_priv=state.ed25519_private,
+                            sender_x25519_pub=state.x25519_private.public_key(),
                             sender_id=str(state.current_user.id),
-                            recipient_id=str(keys_data.get("user_id", ""))
+                            recipient_id=recipient_id
                         )
                         
                         # Send encrypted message via API
@@ -849,6 +917,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                             room_id=room.id,
                             recipient_username=recipient_username,
                             encrypted_blob_b64=encrypted_data["blob"],
+                            sender_encrypted_blob_b64=encrypted_data["sender_blob"],
                             signature_b64=encrypted_data["signature"]
                         )
                         logging.info(f"[SEND] Encrypted message sent successfully")

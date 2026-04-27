@@ -24,6 +24,11 @@ app = true
 packages = false
 cleanup = false
 
+[tool.flet.splash]
+android = true
+ios = false
+web = false
+
 [build-system]
 requires = ["flet[build]==0.84.0"]
 build-backend = "flet.build"

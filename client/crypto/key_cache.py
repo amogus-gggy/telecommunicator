@@ -39,18 +39,19 @@ class PublicKeyCache:
         return self._cache.get(user_id)
 
     def set_public_keys(
-        self, user_id: str, ed25519_pub: Ed25519PublicKey, x25519_pub: X25519PublicKey
+        self, user_id: str, ed25519_pub: Ed25519PublicKey, x25519_pub: X25519PublicKey, numeric_user_id: str = ""
     ):
         """Store public keys in cache.
         
         Args:
-            user_id: User identifier
+            user_id: User identifier (username)
             ed25519_pub: Ed25519 public key for signature verification
             x25519_pub: X25519 public key for key agreement
+            numeric_user_id: Numeric user ID for use as recipient_id in encryption
             
         Requirements: 4.6
         """
-        self._cache[user_id] = {"ed25519_pub": ed25519_pub, "x25519_pub": x25519_pub}
+        self._cache[user_id] = {"ed25519_pub": ed25519_pub, "x25519_pub": x25519_pub, "user_id": numeric_user_id}
 
     def clear(self):
         """Clear all cached keys.

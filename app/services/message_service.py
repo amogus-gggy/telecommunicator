@@ -199,7 +199,9 @@ async def get_message_history(
                 body=msg_orm.body,
                 is_encrypted=msg_orm.is_encrypted,
                 encrypted_blob=base64.b64encode(msg_orm.encrypted_blob).decode() if msg_orm.encrypted_blob else None,
+                sender_encrypted_blob=base64.b64encode(msg_orm.sender_encrypted_blob).decode() if msg_orm.sender_encrypted_blob else None,
                 signature=base64.b64encode(msg_orm.signature).decode() if msg_orm.signature else None,
+                recipient_id=msg_orm.recipient_id,
                 created_at=msg_orm.created_at,
                 files=message_files,
             )
@@ -214,6 +216,7 @@ async def send_encrypted_message(
     recipient_username: str,
     room_id: int,
     encrypted_blob: bytes,
+    sender_encrypted_blob: bytes,
     signature: bytes,
 ) -> SendMessageResponse:
     """Persist and deliver an E2EE message. Raises HTTPException on failure."""
@@ -237,6 +240,7 @@ async def send_encrypted_message(
         room_id=room_id,
         author_id=sender_id,
         encrypted_blob=encrypted_blob,
+        sender_encrypted_blob=sender_encrypted_blob,
         signature=signature,
         recipient_id=recipient.id,
         is_encrypted=True,
@@ -263,6 +267,7 @@ async def send_encrypted_message(
                     "sender_username": sender_username,
                     "room_id": room_id,
                     "encrypted_blob": base64.b64encode(encrypted_blob).decode(),
+                    "sender_encrypted_blob": base64.b64encode(sender_encrypted_blob).decode(),
                     "signature": base64.b64encode(signature).decode(),
                     "is_encrypted": True,
                     "created_at": msg.created_at.isoformat(),

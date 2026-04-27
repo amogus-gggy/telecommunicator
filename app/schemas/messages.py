@@ -12,7 +12,9 @@ class MessageResponse(BaseModel):
     body: str | None = None
     is_encrypted: bool = False
     encrypted_blob: str | None = None
+    sender_encrypted_blob: str | None = None
     signature: str | None = None
+    recipient_id: int | None = None
     created_at: datetime
     files: list[dict] | None = None
 
@@ -21,6 +23,7 @@ class SendEncryptedMessageRequest(BaseModel):
     room_id: int
     recipient_username: str
     encrypted_blob: str
+    sender_encrypted_blob: str
     signature: str
 
 

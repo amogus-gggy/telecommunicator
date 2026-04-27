@@ -34,81 +34,82 @@ class MessageEncryptor:
         plaintext: str,
         recipient_x25519_pub: X25519PublicKey,
         sender_ed25519_priv: Ed25519PrivateKey,
+        sender_x25519_pub: X25519PublicKey,
         sender_id: str,
         recipient_id: str,
     ) -> dict:
         """
-        Encrypt a message with forward secrecy and sign it.
+        Encrypt a message for both recipient and sender (double encryption).
 
-        Args:
-            plaintext: Message text to encrypt
-            recipient_x25519_pub: Recipient's X25519 public key
-            sender_ed25519_priv: Sender's Ed25519 private key for signing
-            sender_id: Sender's user ID
-            recipient_id: Recipient's user ID
+        The message key is generated once and encrypted twice:
+        - once with a wrapping key derived from ECDH(ephemeral, recipient_pub)  → blob for recipient
+        - once with a wrapping key derived from ECDH(ephemeral, sender_pub)     → blob for sender
+
+        Both blobs share the same ciphertext and signature, so E2EE is preserved.
 
         Returns:
-            dict with "blob" (base64 encoded JSON) and "signature" (base64 encoded)
-
-        Requirements: 5.1–5.8, 6.1–6.6, 7.1–7.6
+            dict with "blob", "sender_blob", "signature" (all base64 encoded)
         """
         # 1. Generate ephemeral X25519 keypair
         ephemeral_priv, ephemeral_pub = KeyGenerator.generate_ephemeral_keypair()
-
-        # 2. ECDH: shared_secret = ephemeral_priv.exchange(recipient_pub)
-        shared_secret = ephemeral_priv.exchange(recipient_x25519_pub)
-
-        # 3. Derive wrapping key with HKDF-SHA256
         ephemeral_pub_bytes = KeyGenerator.serialize_public_key(ephemeral_pub)
-        recipient_pub_bytes = KeyGenerator.serialize_public_key(recipient_x25519_pub)
-        salt = ephemeral_pub_bytes + recipient_pub_bytes
 
-        hkdf = HKDF(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            info=b"msg-v1",
-        )
-        wrapping_key = hkdf.derive(shared_secret)
-
-        # 4. Generate random 32-byte message key
+        # 2. Encrypt plaintext with a random message key (shared between both copies)
         message_key = os.urandom(32)
-
-        # 5. Encrypt message key with wrapping key (AES-256-GCM, 12-byte nonce)
-        nonce_wrap = os.urandom(12)
-        aesgcm_wrap = AESGCM(wrapping_key)
-        encrypted_msg_key = aesgcm_wrap.encrypt(nonce_wrap, message_key, None)
-
-        # 6. Encrypt plaintext with message key (AES-256-GCM, 12-byte nonce)
         nonce_msg = os.urandom(12)
         aesgcm_msg = AESGCM(message_key)
-        plaintext_bytes = plaintext.encode("utf-8")
-        ciphertext_msg = aesgcm_msg.encrypt(nonce_msg, plaintext_bytes, None)
+        ciphertext_msg = aesgcm_msg.encrypt(nonce_msg, plaintext.encode("utf-8"), None)
 
-        # 7. Build canonical JSON structure
+        # 3. Build recipient blob — message key wrapped with ECDH(ephemeral, recipient_pub)
+        recipient_pub_bytes = KeyGenerator.serialize_public_key(recipient_x25519_pub)
+        shared_secret_r = ephemeral_priv.exchange(recipient_x25519_pub)
+        wrapping_key_r = self._derive_wrapping_key(shared_secret_r, ephemeral_pub_bytes, recipient_pub_bytes)
+        nonce_wrap_r = os.urandom(12)
+        encrypted_msg_key_r = AESGCM(wrapping_key_r).encrypt(nonce_wrap_r, message_key, None)
+
         blob_dict = {
             "sender_id": sender_id,
             "recipient_id": recipient_id,
             "ephemeral_pub": b64encode(ephemeral_pub_bytes).decode("ascii"),
-            "encrypted_msg_key": b64encode(encrypted_msg_key).decode("ascii"),
-            "nonce_wrap": b64encode(nonce_wrap).decode("ascii"),
+            "encrypted_msg_key": b64encode(encrypted_msg_key_r).decode("ascii"),
+            "nonce_wrap": b64encode(nonce_wrap_r).decode("ascii"),
             "ciphertext_msg": b64encode(ciphertext_msg).decode("ascii"),
             "nonce_msg": b64encode(nonce_msg).decode("ascii"),
         }
+        json_bytes = json.dumps(blob_dict, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
-        # Canonical JSON: sorted keys, no whitespace
-        json_bytes = json.dumps(blob_dict, sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        )
-
-        # 8. Sign the JSON bytes with sender's Ed25519 private key
+        # 4. Sign the recipient blob
         signature_bytes = sender_ed25519_priv.sign(json_bytes)
 
-        # 9. Return {"blob": base64(json_bytes), "signature": base64(signature_bytes)}
+        # 5. Build sender blob — same ciphertext, message key wrapped with ECDH(ephemeral, sender_pub)
+        sender_pub_bytes = KeyGenerator.serialize_public_key(sender_x25519_pub)
+        shared_secret_s = ephemeral_priv.exchange(sender_x25519_pub)
+        wrapping_key_s = self._derive_wrapping_key(shared_secret_s, ephemeral_pub_bytes, sender_pub_bytes)
+        nonce_wrap_s = os.urandom(12)
+        encrypted_msg_key_s = AESGCM(wrapping_key_s).encrypt(nonce_wrap_s, message_key, None)
+
+        sender_blob_dict = {
+            "sender_id": sender_id,
+            "recipient_id": recipient_id,
+            "ephemeral_pub": b64encode(ephemeral_pub_bytes).decode("ascii"),
+            "encrypted_msg_key": b64encode(encrypted_msg_key_s).decode("ascii"),
+            "nonce_wrap": b64encode(nonce_wrap_s).decode("ascii"),
+            "ciphertext_msg": b64encode(ciphertext_msg).decode("ascii"),
+            "nonce_msg": b64encode(nonce_msg).decode("ascii"),
+        }
+        sender_json_bytes = json.dumps(sender_blob_dict, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
         return {
             "blob": b64encode(json_bytes).decode("ascii"),
+            "sender_blob": b64encode(sender_json_bytes).decode("ascii"),
             "signature": b64encode(signature_bytes).decode("ascii"),
         }
+
+    @staticmethod
+    def _derive_wrapping_key(shared_secret: bytes, ephemeral_pub_bytes: bytes, peer_pub_bytes: bytes) -> bytes:
+        salt = ephemeral_pub_bytes + peer_pub_bytes
+        hkdf = HKDF(algorithm=hashes.SHA256(), length=32, salt=salt, info=b"msg-v1")
+        return hkdf.derive(shared_secret)
 
 
 class MessageDecryptor:
@@ -120,34 +121,27 @@ class MessageDecryptor:
         recipient_x25519_priv: X25519PrivateKey,
         sender_ed25519_pub: Ed25519PublicKey,
     ) -> str:
-        """
-        Decrypt and verify a message.
-
-        Args:
-            encrypted_msg: dict with "blob" and "signature" (both base64 encoded)
-            recipient_x25519_priv: Recipient's X25519 private key
-            sender_ed25519_pub: Sender's Ed25519 public key for verification
-
-        Returns:
-            Decrypted plaintext string
-
-        Raises:
-            InvalidSignature: If signature verification fails
-            InvalidTag: If decryption fails (wrong key or tampered ciphertext)
-
-        Requirements: 5.1–5.8, 6.1–6.6, 7.1–7.6, 11.1–11.4, 13.1–13.5
-        """
-        # 1. Parse encrypted_msg dict, base64-decode blob and signature
+        """Decrypt and verify a message received from another user."""
         blob_bytes = b64decode(encrypted_msg["blob"])
         signature_bytes = b64decode(encrypted_msg["signature"])
 
-        # 2. Verify Ed25519 signature on blob using sender's public key
         try:
             sender_ed25519_pub.verify(signature_bytes, blob_bytes)
         except InvalidSignature:
             raise InvalidSignature("Message signature verification failed")
 
-        # 3. Parse JSON blob to extract components
+        return self._decrypt_blob(blob_bytes, recipient_x25519_priv)
+
+    def decrypt_own_message(
+        self,
+        sender_blob_b64: str,
+        sender_x25519_priv: X25519PrivateKey,
+    ) -> str:
+        """Decrypt the sender's own copy of a sent message (no signature check needed)."""
+        return self._decrypt_blob(b64decode(sender_blob_b64), sender_x25519_priv)
+
+    @staticmethod
+    def _decrypt_blob(blob_bytes: bytes, x25519_priv: X25519PrivateKey) -> str:
         blob_dict = json.loads(blob_bytes.decode("utf-8"))
 
         ephemeral_pub_bytes = b64decode(blob_dict["ephemeral_pub"])
@@ -156,37 +150,22 @@ class MessageDecryptor:
         ciphertext_msg = b64decode(blob_dict["ciphertext_msg"])
         nonce_msg = b64decode(blob_dict["nonce_msg"])
 
-        # 4. ECDH: shared_secret = recipient_priv.exchange(ephemeral_pub)
         ephemeral_pub = KeyGenerator.load_x25519_public_key(ephemeral_pub_bytes)
-        shared_secret = recipient_x25519_priv.exchange(ephemeral_pub)
+        shared_secret = x25519_priv.exchange(ephemeral_pub)
 
-        # 5. Derive wrapping key with same HKDF parameters
-        recipient_pub_bytes = KeyGenerator.serialize_public_key(
-            recipient_x25519_priv.public_key()
-        )
-        salt = ephemeral_pub_bytes + recipient_pub_bytes
-
-        hkdf = HKDF(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            info=b"msg-v1",
-        )
+        peer_pub_bytes = KeyGenerator.serialize_public_key(x25519_priv.public_key())
+        salt = ephemeral_pub_bytes + peer_pub_bytes
+        hkdf = HKDF(algorithm=hashes.SHA256(), length=32, salt=salt, info=b"msg-v1")
         wrapping_key = hkdf.derive(shared_secret)
 
-        # 6. Decrypt message key (raise InvalidTag if fails)
-        aesgcm_wrap = AESGCM(wrapping_key)
         try:
-            message_key = aesgcm_wrap.decrypt(nonce_wrap, encrypted_msg_key, None)
+            message_key = AESGCM(wrapping_key).decrypt(nonce_wrap, encrypted_msg_key, None)
         except InvalidTag:
             raise InvalidTag("Failed to decrypt message key")
 
-        # 7. Decrypt plaintext with message key (raise InvalidTag if fails)
-        aesgcm_msg = AESGCM(message_key)
         try:
-            plaintext_bytes = aesgcm_msg.decrypt(nonce_msg, ciphertext_msg, None)
+            plaintext_bytes = AESGCM(message_key).decrypt(nonce_msg, ciphertext_msg, None)
         except InvalidTag:
             raise InvalidTag("Failed to decrypt message plaintext")
 
-        # 8. Return plaintext string
         return plaintext_bytes.decode("utf-8")

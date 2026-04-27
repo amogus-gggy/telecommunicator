@@ -32,6 +32,11 @@ async def send_message_encrypted(
         raise HTTPException(status_code=400, detail="encrypted_blob is not valid base64")
 
     try:
+        sender_encrypted_blob_bytes = base64.b64decode(body.sender_encrypted_blob)
+    except Exception:
+        raise HTTPException(status_code=400, detail="sender_encrypted_blob is not valid base64")
+
+    try:
         signature_bytes = base64.b64decode(body.signature)
     except Exception:
         raise HTTPException(status_code=400, detail="signature is not valid base64")
@@ -42,6 +47,7 @@ async def send_message_encrypted(
         body.recipient_username,
         body.room_id,
         encrypted_blob_bytes,
+        sender_encrypted_blob_bytes,
         signature_bytes,
     )
 

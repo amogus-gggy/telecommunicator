@@ -129,6 +129,13 @@ en:
     username_label: "Username: %{username}"
     display_name_label: "Display name: %{name}"
     close: "Close"
+    encrypted_sent: "🔒 Encrypted message"
+    encrypted_no_keys: "🔒 [Encrypted message — keys not available]"
+    encrypted_unknown_sender: "🔒 [Encrypted message — sender unknown]"
+    encrypted_malformed: "🔒 [Encrypted message — malformed]"
+    encrypted_bad_signature: "⚠️ [Security warning: message signature invalid]"
+    encrypted_bad_key: "🔒 [Decryption error: invalid key or tampered message]"
+    encrypted_error: "🔒 [Decryption error: %{exc}]"
 
   room_settings:
     title: "Room Settings — %{name}"

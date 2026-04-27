@@ -204,11 +204,12 @@ class APIClient:
         r = await self._put("/backup", json={"encrypted_backup": encrypted_backup_b64})
         return r.json()
 
-    async def send_encrypted_message(self, room_id: int, recipient_username: str, encrypted_blob_b64: str, signature_b64: str) -> dict:
+    async def send_encrypted_message(self, room_id: int, recipient_username: str, encrypted_blob_b64: str, sender_encrypted_blob_b64: str, signature_b64: str) -> dict:
         r = await self._post("/messages", json={
             "room_id": room_id,
             "recipient_username": recipient_username,
             "encrypted_blob": encrypted_blob_b64,
+            "sender_encrypted_blob": sender_encrypted_blob_b64,
             "signature": signature_b64
         })
         return r.json()
