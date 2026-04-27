@@ -50,8 +50,11 @@ class AppState:
 
     def __post_init__(self) -> None:
         if self.public_key_cache is None:
-            from crypto.key_cache import PublicKeyCache
-            self.public_key_cache = PublicKeyCache()
+            try:
+                from crypto.key_cache import PublicKeyCache
+                self.public_key_cache = PublicKeyCache()
+            except ImportError:
+                pass  # Will be initialized later when crypto module is available
 
     def __setattr__(self, name: str, value: object) -> None:
         object.__setattr__(self, name, value)
