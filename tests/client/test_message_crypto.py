@@ -18,6 +18,7 @@ class TestMessageCrypto:
         """Test that encryption and decryption work correctly."""
         # Generate keys for sender and recipient
         sender_ed25519_priv, sender_ed25519_pub = KeyGenerator.generate_identity_keypair()
+        sender_x25519_priv, sender_x25519_pub = KeyGenerator.generate_prekey_keypair()
         recipient_x25519_priv, recipient_x25519_pub = KeyGenerator.generate_prekey_keypair()
 
         # Create encryptor and decryptor
@@ -34,6 +35,7 @@ class TestMessageCrypto:
             plaintext=plaintext,
             recipient_x25519_pub=recipient_x25519_pub,
             sender_ed25519_priv=sender_ed25519_priv,
+            sender_x25519_pub=sender_x25519_pub,
             sender_id=sender_id,
             recipient_id=recipient_id,
         )
@@ -57,6 +59,7 @@ class TestMessageCrypto:
         # Generate keys
         sender_ed25519_priv, _ = KeyGenerator.generate_identity_keypair()
         _, wrong_ed25519_pub = KeyGenerator.generate_identity_keypair()
+        sender_x25519_priv, sender_x25519_pub = KeyGenerator.generate_prekey_keypair()
         recipient_x25519_priv, recipient_x25519_pub = KeyGenerator.generate_prekey_keypair()
 
         encryptor = MessageEncryptor()
@@ -67,6 +70,7 @@ class TestMessageCrypto:
             plaintext="Secret message",
             recipient_x25519_pub=recipient_x25519_pub,
             sender_ed25519_priv=sender_ed25519_priv,
+            sender_x25519_pub=sender_x25519_pub,
             sender_id="user1",
             recipient_id="user2",
         )
@@ -83,6 +87,7 @@ class TestMessageCrypto:
         """Test that decryption fails with wrong recipient private key."""
         # Generate keys
         sender_ed25519_priv, sender_ed25519_pub = KeyGenerator.generate_identity_keypair()
+        sender_x25519_priv, sender_x25519_pub = KeyGenerator.generate_prekey_keypair()
         recipient_x25519_priv, recipient_x25519_pub = KeyGenerator.generate_prekey_keypair()
         wrong_x25519_priv, _ = KeyGenerator.generate_prekey_keypair()
 
@@ -94,6 +99,7 @@ class TestMessageCrypto:
             plaintext="Secret message",
             recipient_x25519_pub=recipient_x25519_pub,
             sender_ed25519_priv=sender_ed25519_priv,
+            sender_x25519_pub=sender_x25519_pub,
             sender_id="user1",
             recipient_id="user2",
         )
@@ -109,6 +115,7 @@ class TestMessageCrypto:
     def test_encrypt_empty_message(self):
         """Test encryption of empty message."""
         sender_ed25519_priv, sender_ed25519_pub = KeyGenerator.generate_identity_keypair()
+        sender_x25519_priv, sender_x25519_pub = KeyGenerator.generate_prekey_keypair()
         recipient_x25519_priv, recipient_x25519_pub = KeyGenerator.generate_prekey_keypair()
 
         encryptor = MessageEncryptor()
@@ -120,6 +127,7 @@ class TestMessageCrypto:
             plaintext=plaintext,
             recipient_x25519_pub=recipient_x25519_pub,
             sender_ed25519_priv=sender_ed25519_priv,
+            sender_x25519_pub=sender_x25519_pub,
             sender_id="user1",
             recipient_id="user2",
         )
@@ -135,6 +143,7 @@ class TestMessageCrypto:
     def test_encrypt_unicode_message(self):
         """Test encryption of Unicode message."""
         sender_ed25519_priv, sender_ed25519_pub = KeyGenerator.generate_identity_keypair()
+        sender_x25519_priv, sender_x25519_pub = KeyGenerator.generate_prekey_keypair()
         recipient_x25519_priv, recipient_x25519_pub = KeyGenerator.generate_prekey_keypair()
 
         encryptor = MessageEncryptor()
@@ -146,6 +155,7 @@ class TestMessageCrypto:
             plaintext=plaintext,
             recipient_x25519_pub=recipient_x25519_pub,
             sender_ed25519_priv=sender_ed25519_priv,
+            sender_x25519_pub=sender_x25519_pub,
             sender_id="user1",
             recipient_id="user2",
         )
