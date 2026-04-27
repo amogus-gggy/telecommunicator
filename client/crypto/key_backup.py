@@ -3,8 +3,6 @@ Key backup and restore utilities for E2EE cryptographic keys.
 
 Encrypts Ed25519 and X25519 private keys with a password using
 PBKDF2-HMAC-SHA256 key derivation and AES-256-GCM encryption.
-
-Requirements: 2.1–2.7, 3.3–3.7, 12.1–12.5
 """
 
 import base64
@@ -48,8 +46,6 @@ class KeyBackupManager:
         """Encrypt private keys into a portable backup blob.
 
         Blob format: salt(16) || nonce(12) || ciphertext+tag
-
-        Requirements: 2.1, 2.2, 2.3, 12.1, 12.2
         """
         ed_raw = KeyGenerator.serialize_private_key(ed25519_priv)
         x_raw = KeyGenerator.serialize_private_key(x25519_priv)
@@ -77,7 +73,6 @@ class KeyBackupManager:
         Raises:
             InvalidTag: if the password is wrong or the blob is corrupted.
 
-        Requirements: 2.4, 2.5, 2.6, 2.7, 12.3, 12.4, 12.5
         """
         salt = encrypted_blob[:_SALT_SIZE]
         nonce = encrypted_blob[_SALT_SIZE:_SALT_SIZE + _NONCE_SIZE]

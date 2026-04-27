@@ -229,8 +229,6 @@ class APIClient:
 
     async def rotate_keys(self) -> None:
         """Rotate X25519 prekey and update backup.
-        
-        Requirements: 23.1, 23.2, 23.3, 23.7
         """
         import base64
         from crypto.key_generator import KeyGenerator

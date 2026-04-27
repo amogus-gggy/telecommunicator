@@ -33,7 +33,7 @@ async def register_user(
     """Register a new user with E2EE public keys. Raises 409 on duplicate, 400 on invalid keys."""
     from fastapi import HTTPException
 
-    # Validate public key sizes (Requirements 1.4, 1.5, 14.1, 14.2, 19.6)
+    # Validate public key sizes
     if len(identity_pub_ed25519) != 32:
         raise HTTPException(status_code=400, detail="identity_pub_ed25519 must be exactly 32 bytes")
     if len(identity_pub_x25519) != 32:

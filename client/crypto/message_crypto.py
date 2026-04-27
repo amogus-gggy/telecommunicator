@@ -3,7 +3,6 @@ Message encryption and decryption for E2EE messaging.
 
 Implements forward-secret message encryption using ephemeral X25519 keys,
 ECDH key agreement, HKDF key derivation, and AES-256-GCM authenticated encryption.
-Requirements: 5.1–5.8, 6.1–6.6, 7.1–7.6, 11.1–11.4, 13.1–13.5
 """
 
 import json

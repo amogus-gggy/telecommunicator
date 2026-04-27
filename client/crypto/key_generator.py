@@ -2,7 +2,7 @@
 Key generation and serialization utilities for E2EE cryptographic operations.
 
 Supports Ed25519 (identity/signing) and X25519 (key agreement) key pairs.
-Requirements: 1.1, 1.2, 10.1–10.7
+
 """
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -28,7 +28,6 @@ class KeyGenerator:
     def generate_identity_keypair() -> tuple[Ed25519PrivateKey, Ed25519PublicKey]:
         """Generate an Ed25519 signing key pair for user identity.
 
-        Requirements: 1.1, 10.1, 10.4
         """
         private_key = Ed25519PrivateKey.generate()
         public_key = private_key.public_key()
@@ -38,7 +37,6 @@ class KeyGenerator:
     def generate_prekey_keypair() -> tuple[X25519PrivateKey, X25519PublicKey]:
         """Generate an X25519 key agreement pair for encryption (prekey).
 
-        Requirements: 1.2, 10.2, 10.5
         """
         private_key = X25519PrivateKey.generate()
         public_key = private_key.public_key()
@@ -58,7 +56,6 @@ class KeyGenerator:
     def serialize_public_key(pub: Ed25519PublicKey | X25519PublicKey) -> bytes:
         """Serialize a public key to raw bytes (32 bytes).
 
-        Requirements: 10.4, 10.5
         """
         return pub.public_bytes(Encoding.Raw, PublicFormat.Raw)
 
@@ -66,7 +63,6 @@ class KeyGenerator:
     def serialize_private_key(priv: Ed25519PrivateKey | X25519PrivateKey) -> bytes:
         """Serialize a private key to raw bytes (32 bytes), no encryption.
 
-        Requirements: 10.4, 10.5
         """
         return priv.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
 
@@ -99,8 +95,6 @@ class KeyGenerator:
             
         Returns:
             Tuple of (new_private_key, new_public_key)
-            
-        Requirements: 23.1, 23.4
         """
         from state import AppState
         
