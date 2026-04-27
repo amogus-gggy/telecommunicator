@@ -16,10 +16,10 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(nullable=False)
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
-    # E2EE fields (Requirements 1.4, 1.5, 14.1, 14.2)
+    # E2EE fields
     identity_pub_ed25519: Mapped[bytes | None] = mapped_column(LargeBinary(32), nullable=True)
     identity_pub_x25519: Mapped[bytes | None] = mapped_column(LargeBinary(32), nullable=True)
 
-    # Key backup fields (Requirements 2.6)
+    # Key backup fields
     encrypted_backup: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     backup_version: Mapped[int] = mapped_column(default=1, nullable=False, server_default="1")
