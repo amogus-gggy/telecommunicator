@@ -546,6 +546,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 "files": raw.get("files", []),
                 "is_encrypted": True,
                 "encrypted_blob": raw.get("encrypted_blob"),
+                "sender_encrypted_blob": raw.get("sender_encrypted_blob"),
                 "signature": raw.get("signature"),
             }
             # Only display if this message belongs to the currently open room
@@ -918,7 +919,8 @@ def room_view(page: flet.Page, state: AppState) -> None:
                             recipient_username=recipient_username,
                             encrypted_blob_b64=encrypted_data["blob"],
                             sender_encrypted_blob_b64=encrypted_data["sender_blob"],
-                            signature_b64=encrypted_data["signature"]
+                            signature_b64=encrypted_data["signature"],
+                            file_ids=[f["id"] for f in uploaded_files if f.get("id")],
                         )
                         logging.info(f"[SEND] Encrypted message sent successfully")
                     except Exception as enc_exc:

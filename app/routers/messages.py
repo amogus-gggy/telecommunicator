@@ -49,6 +49,7 @@ async def send_message_encrypted(
         encrypted_blob_bytes,
         sender_encrypted_blob_bytes,
         signature_bytes,
+        file_ids=body.file_ids,
     )
 
 

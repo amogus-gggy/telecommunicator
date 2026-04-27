@@ -25,6 +25,7 @@ class SendEncryptedMessageRequest(BaseModel):
     encrypted_blob: str
     sender_encrypted_blob: str
     signature: str
+    file_ids: list[int] = []
 
 
 class SendMessageResponse(BaseModel):

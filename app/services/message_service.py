@@ -218,6 +218,7 @@ async def send_encrypted_message(
     encrypted_blob: bytes,
     sender_encrypted_blob: bytes,
     signature: bytes,
+    file_ids: list[int] | None = None,
 ) -> SendMessageResponse:
     """Persist and deliver an E2EE message. Raises HTTPException on failure."""
     # 1. Resolve recipient by username
@@ -249,6 +250,16 @@ async def send_encrypted_message(
     await db.commit()
     await db.refresh(msg)
 
+    # Associate uploaded files with this message
+    if file_ids:
+        from app.models.file import File
+        for fid in file_ids:
+            file_orm = await db.get(File, fid)
+            if file_orm and file_orm.room_id == room_id:
+                file_orm.message_id = msg.id
+        await db.commit()
+        await db.refresh(msg)
+
     # 4. Attempt WebSocket delivery to recipient — include full encrypted payload
     delivered = False
     try:
@@ -256,6 +267,18 @@ async def send_encrypted_message(
         sender_result = await db.execute(select(User).where(User.id == sender_id))
         sender = sender_result.scalar_one_or_none()
         sender_username = sender.username if sender else str(sender_id)
+
+        # Load associated files for the WS payload
+        from app.models.file import File
+        from sqlalchemy.orm import selectinload
+        msg_with_files = await db.execute(
+            select(Message).options(selectinload(Message.files)).where(Message.id == msg.id)
+        )
+        msg_loaded = msg_with_files.scalar_one()
+        files_payload = [
+            {"id": f.id, "filename": f.filename, "room_id": f.room_id, "created_at": f.created_at.isoformat()}
+            for f in (msg_loaded.files or [])
+        ]
 
         await manager.send_to_user(
             recipient.id,
@@ -271,6 +294,7 @@ async def send_encrypted_message(
                     "signature": base64.b64encode(signature).decode(),
                     "is_encrypted": True,
                     "created_at": msg.created_at.isoformat(),
+                    "files": files_payload,
                 },
             },
         )
