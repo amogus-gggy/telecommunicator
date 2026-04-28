@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import logging
 import flet
 
 from api.http_client import APIClient, AuthError
-from api.ws_client import WsClient
+from api.ws_client import UnifiedWsClient
 from config import API_URL
 from localization import t
 from state import AppState
@@ -11,7 +12,7 @@ from views.widgets.markdown_viewer import MarkdownViewer, resolve_shortcodes
 from views.widgets.formatting_toolbar import FormattingToolbar
 from views.widgets.emoji_picker import EmojiPicker
 
-import httpx 
+import httpx
 
 
 def room_view(page: flet.Page, state: AppState) -> None:
@@ -1142,26 +1143,36 @@ def room_view(page: flet.Page, state: AppState) -> None:
     state.on_alignment_change = _rebuild_messages
 
     async def _start_ws() -> None:
-        # Close any existing room WebSocket before opening a new one
-        state.close_room_ws()
+        if state.ws is not None:
+            # Reuse existing connection — just update callbacks and room subscription
+            state.ws._on_room_message = _on_ws_message
+            state.ws._on_reconnecting = _on_reconnecting
+            state.ws.set_room(room.id)
+            _state["ws_client"] = state.ws
+            logger.debug("[room_view] Reusing existing WS, switched to room %s", room.id)
+            return
 
-        ws = WsClient(
+        # No existing connection — create a new unified client
+        ws = UnifiedWsClient(
             token=state.token or "",
-            room_id=room.id,
-            on_message=_on_ws_message,
+            on_room_message=_on_ws_message,
             on_reconnecting=_on_reconnecting,
         )
+        ws.set_room(room.id)
         _state["ws_client"] = ws
-        state.room_ws = ws
+        state.ws = ws
         await ws.connect()
 
     def _go_back(e: flet.ControlEvent) -> None:
-        state.close_room_ws()
+        # Clear room-specific callbacks but keep the connection alive for notifications
+        if state.ws is not None:
+            state.ws._on_room_message = None
+            state.ws._on_reconnecting = None
+            state.ws.set_room(None)
         state.on_alignment_change = None
         _state["ws_client"] = None
         state.active_room = None
         from views.chat_list_view import chat_list_view
-
         chat_list_view(page, state)
 
     def _go_settings(e: flet.ControlEvent) -> None:

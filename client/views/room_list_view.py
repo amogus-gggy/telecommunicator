@@ -3,7 +3,7 @@ from __future__ import annotations
 import flet
 
 from api.http_client import APIClient
-from api.ws_client import NotificationClient
+from api.ws_client import UnifiedWsClient
 from config import API_URL
 from localization import t
 from state import AppState, RoomDTO
@@ -224,8 +224,11 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
             page.run_task(_load_rooms)
 
     async def _start_notifications() -> None:
-        nc = NotificationClient(token=state.token or "", on_notification=_on_notification)
-        _notif_client["client"] = nc
+        if state.ws is not None:
+            state.ws._on_notification = _on_notification
+            return
+        nc = UnifiedWsClient(token=state.token or "", on_notification=_on_notification)
+        state.ws = nc
         await nc.connect()
 
     def _stop_refresh() -> None:

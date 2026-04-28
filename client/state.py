@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
-    from api.ws_client import WsClient, NotificationClient
+    from api.ws_client import UnifiedWsClient, WsClient, NotificationClient
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
     from crypto.key_cache import PublicKeyCache
@@ -41,9 +41,27 @@ class AppState:
     active_room: RoomDTO | None = None
     message_alignment: str = "default"  # "default" | "left" | "right"
     secure_storage: Any = field(default=None, repr=False)
-    # Active WebSocket connections — closed before creating new ones
-    room_ws: "WsClient | None" = field(default=None, repr=False)
-    notif_ws: "NotificationClient | None" = field(default=None, repr=False)
+    # Single shared WebSocket connection (room messages + notifications)
+    ws: "UnifiedWsClient | None" = field(default=None, repr=False)
+    # Backwards-compat aliases — point to the same object
+    @property
+    def room_ws(self) -> "UnifiedWsClient | None":
+        return self.ws
+
+    @room_ws.setter
+    def room_ws(self, value: "UnifiedWsClient | None") -> None:
+        object.__setattr__(self, "ws", value)
+
+    @property
+    def notif_ws(self) -> "UnifiedWsClient | None":
+        return self.ws
+
+    @notif_ws.setter
+    def notif_ws(self, value: "UnifiedWsClient | None") -> None:
+        # Only replace if setting a new client; ignore None assignments from old code
+        # that try to clear notif_ws independently
+        if value is not None:
+            object.__setattr__(self, "ws", value)
     # Callback invoked when message_alignment changes (set by room_view)
     on_alignment_change: "Callable[[str], None] | None" = field(default=None, repr=False)
     # E2EE cryptographic keys
@@ -78,14 +96,20 @@ class AppState:
             object.__setattr__(self, name, value)
 
     def close_room_ws(self) -> None:
-        if self.room_ws is not None:
-            self.room_ws.close()
-            self.room_ws = None
+        if self.ws is not None:
+            self.ws.close()
+            object.__setattr__(self, "ws", None)
 
     def close_notif_ws(self) -> None:
-        if self.notif_ws is not None:
-            self.notif_ws.close()
-            self.notif_ws = None
+        # Same connection — only close if we're not inside a room
+        # (room_view will call close_room_ws when leaving)
+        pass
+
+    def close_ws(self) -> None:
+        """Close the unified WebSocket connection."""
+        if self.ws is not None:
+            self.ws.close()
+            object.__setattr__(self, "ws", None)
 
     def clear_crypto_keys(self) -> None:
         """Clear cryptographic keys from memory."""

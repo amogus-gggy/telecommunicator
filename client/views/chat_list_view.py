@@ -4,7 +4,7 @@ import asyncio
 import flet
 
 from api.http_client import APIClient
-from api.ws_client import NotificationClient
+from api.ws_client import UnifiedWsClient
 from cache.cache_manager import CacheManager
 from config import API_URL
 from localization import t
@@ -412,9 +412,13 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             page.update()
 
     async def _start_notifications() -> None:
-        state.close_notif_ws()
-        nc = NotificationClient(token=state.token or "", on_notification=_on_notification)
-        state.notif_ws = nc
+        # Reuse existing connection if already alive, otherwise create one
+        if state.ws is not None:
+            # Update the notification callback on the existing connection
+            state.ws._on_notification = _on_notification
+            return
+        nc = UnifiedWsClient(token=state.token or "", on_notification=_on_notification)
+        state.ws = nc
         await nc.connect()
 
     def _start_background_refresh() -> None:
@@ -445,7 +449,10 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
     def _stop_refresh() -> None:
         _active["running"] = False
         cache_manager.stop_background_refresh()
-        state.close_notif_ws()
+        # Don't close the WS here — room_view will reuse it.
+        # Only clear the notification callback so stale notifications are ignored.
+        if state.ws is not None:
+            state.ws._on_notification = None
 
     top_bar = flet.Container(
         content=flet.Row(
