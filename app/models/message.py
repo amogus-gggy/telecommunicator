@@ -25,7 +25,9 @@ class Message(Base):
 
     # E2EE fields
     encrypted_blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
-    sender_encrypted_blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    sender_encrypted_blob: Mapped[bytes | None] = mapped_column(
+        LargeBinary, nullable=True
+    )
     signature: Mapped[bytes | None] = mapped_column(LargeBinary(64), nullable=True)
     recipient_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
@@ -35,6 +37,4 @@ class Message(Base):
 
     # Relationships
     files: Mapped[list["File"]] = relationship("File", back_populates="message")
-    recipient: Mapped["User | None"] = relationship(
-        "User", foreign_keys=[recipient_id]
-    )
+    recipient: Mapped["User | None"] = relationship("User", foreign_keys=[recipient_id])

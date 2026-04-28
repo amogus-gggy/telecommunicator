@@ -62,9 +62,13 @@ class MessageEncryptor:
         # 3. Build recipient blob — message key wrapped with ECDH(ephemeral, recipient_pub)
         recipient_pub_bytes = KeyGenerator.serialize_public_key(recipient_x25519_pub)
         shared_secret_r = ephemeral_priv.exchange(recipient_x25519_pub)
-        wrapping_key_r = self._derive_wrapping_key(shared_secret_r, ephemeral_pub_bytes, recipient_pub_bytes)
+        wrapping_key_r = self._derive_wrapping_key(
+            shared_secret_r, ephemeral_pub_bytes, recipient_pub_bytes
+        )
         nonce_wrap_r = os.urandom(12)
-        encrypted_msg_key_r = AESGCM(wrapping_key_r).encrypt(nonce_wrap_r, message_key, None)
+        encrypted_msg_key_r = AESGCM(wrapping_key_r).encrypt(
+            nonce_wrap_r, message_key, None
+        )
 
         blob_dict = {
             "sender_id": sender_id,
@@ -75,7 +79,9 @@ class MessageEncryptor:
             "ciphertext_msg": b64encode(ciphertext_msg).decode("ascii"),
             "nonce_msg": b64encode(nonce_msg).decode("ascii"),
         }
-        json_bytes = json.dumps(blob_dict, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        json_bytes = json.dumps(
+            blob_dict, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
 
         # 4. Sign the recipient blob
         signature_bytes = sender_ed25519_priv.sign(json_bytes)
@@ -83,9 +89,13 @@ class MessageEncryptor:
         # 5. Build sender blob — same ciphertext, message key wrapped with ECDH(ephemeral, sender_pub)
         sender_pub_bytes = KeyGenerator.serialize_public_key(sender_x25519_pub)
         shared_secret_s = ephemeral_priv.exchange(sender_x25519_pub)
-        wrapping_key_s = self._derive_wrapping_key(shared_secret_s, ephemeral_pub_bytes, sender_pub_bytes)
+        wrapping_key_s = self._derive_wrapping_key(
+            shared_secret_s, ephemeral_pub_bytes, sender_pub_bytes
+        )
         nonce_wrap_s = os.urandom(12)
-        encrypted_msg_key_s = AESGCM(wrapping_key_s).encrypt(nonce_wrap_s, message_key, None)
+        encrypted_msg_key_s = AESGCM(wrapping_key_s).encrypt(
+            nonce_wrap_s, message_key, None
+        )
 
         sender_blob_dict = {
             "sender_id": sender_id,
@@ -96,7 +106,9 @@ class MessageEncryptor:
             "ciphertext_msg": b64encode(ciphertext_msg).decode("ascii"),
             "nonce_msg": b64encode(nonce_msg).decode("ascii"),
         }
-        sender_json_bytes = json.dumps(sender_blob_dict, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        sender_json_bytes = json.dumps(
+            sender_blob_dict, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
 
         return {
             "blob": b64encode(json_bytes).decode("ascii"),
@@ -105,7 +117,9 @@ class MessageEncryptor:
         }
 
     @staticmethod
-    def _derive_wrapping_key(shared_secret: bytes, ephemeral_pub_bytes: bytes, peer_pub_bytes: bytes) -> bytes:
+    def _derive_wrapping_key(
+        shared_secret: bytes, ephemeral_pub_bytes: bytes, peer_pub_bytes: bytes
+    ) -> bytes:
         salt = ephemeral_pub_bytes + peer_pub_bytes
         hkdf = HKDF(algorithm=hashes.SHA256(), length=32, salt=salt, info=b"msg-v1")
         return hkdf.derive(shared_secret)
@@ -158,12 +172,16 @@ class MessageDecryptor:
         wrapping_key = hkdf.derive(shared_secret)
 
         try:
-            message_key = AESGCM(wrapping_key).decrypt(nonce_wrap, encrypted_msg_key, None)
+            message_key = AESGCM(wrapping_key).decrypt(
+                nonce_wrap, encrypted_msg_key, None
+            )
         except InvalidTag:
             raise InvalidTag("Failed to decrypt message key")
 
         try:
-            plaintext_bytes = AESGCM(message_key).decrypt(nonce_msg, ciphertext_msg, None)
+            plaintext_bytes = AESGCM(message_key).decrypt(
+                nonce_msg, ciphertext_msg, None
+            )
         except InvalidTag:
             raise InvalidTag("Failed to decrypt message plaintext")
 

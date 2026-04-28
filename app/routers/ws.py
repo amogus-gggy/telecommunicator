@@ -28,7 +28,9 @@ async def _get_user_from_token(token: str, db: AsyncSession) -> User | None:
 
 
 @router.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket, token: str | None = None, room_id: int | None = None) -> None:
+async def websocket_endpoint(
+    ws: WebSocket, token: str | None = None, room_id: int | None = None
+) -> None:
     async with AsyncSessionLocal() as db:
         if not token:
             await ws.accept()
@@ -67,17 +69,26 @@ async def websocket_endpoint(ws: WebSocket, token: str | None = None, room_id: i
 
                 try:
                     frame = WsInbound.model_validate_json(raw)
-                    print(f"[WS] Parsed frame: type={frame.type}, room_id={frame.room_id}, files={frame.files}")
+                    print(
+                        f"[WS] Parsed frame: type={frame.type}, room_id={frame.room_id}, files={frame.files}"
+                    )
                 except (ValidationError, ValueError) as e:
                     print(f"[WS] Validation error: {e}")
-                    await ws.send_json({"type": "error", "payload": "Invalid message format"})
+                    await ws.send_json(
+                        {"type": "error", "payload": "Invalid message format"}
+                    )
                     continue
 
                 froom_id = frame.room_id
                 body = frame.body
 
                 if not body or len(body) > 2000:
-                    await ws.send_json({"type": "error", "payload": "Message body must be 1\u20132000 characters"})
+                    await ws.send_json(
+                        {
+                            "type": "error",
+                            "payload": "Message body must be 1\u20132000 characters",
+                        }
+                    )
                     continue
 
                 # Single membership + room fetch — reused by send_message via `room=` kwarg
@@ -87,7 +98,9 @@ async def websocket_endpoint(ws: WebSocket, token: str | None = None, room_id: i
                     )
                 )
                 if membership.scalar_one_or_none() is None:
-                    await ws.send_json({"type": "error", "payload": "Not a member of this room"})
+                    await ws.send_json(
+                        {"type": "error", "payload": "Not a member of this room"}
+                    )
                     continue
 
                 room = await db.get(Room, froom_id)
@@ -95,7 +108,12 @@ async def websocket_endpoint(ws: WebSocket, token: str | None = None, room_id: i
                     await ws.send_json({"type": "error", "payload": "Room not found"})
                     continue
                 if room.read_only and room.owner_id != user.id:
-                    await ws.send_json({"type": "error", "payload": "Room is read-only; only the owner can send messages"})
+                    await ws.send_json(
+                        {
+                            "type": "error",
+                            "payload": "Room is read-only; only the owner can send messages",
+                        }
+                    )
                     continue
 
                 # Ensure subscribed to this room
@@ -106,7 +124,14 @@ async def websocket_endpoint(ws: WebSocket, token: str | None = None, room_id: i
                 try:
                     # Pass room to avoid a second fetch inside send_message
                     files_list = frame.files if frame.files is not None else []
-                    await send_message(room_id=froom_id, body=body, author=user, db=db, room=room, files=files_list)
+                    await send_message(
+                        room_id=froom_id,
+                        body=body,
+                        author=user,
+                        db=db,
+                        room=room,
+                        files=files_list,
+                    )
                 except Exception as exc:
                     detail = getattr(exc, "detail", str(exc))
                     await ws.send_json({"type": "error", "payload": detail})

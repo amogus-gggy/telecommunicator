@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import logging
 import os
 import flet
 
 from api.http_client import APIClient, AuthError
-from api.ws_client import UnifiedWsClient
+from api.ws_client import UnifiedWsClient, WsClient
 from config import API_URL
 from localization import t
 from state import AppState
@@ -45,15 +44,23 @@ def room_view(page: flet.Page, state: AppState) -> None:
         if files is not None:
             oversized = []
             for file in files:
-                size = len(file.bytes) if file.bytes else (os.path.getsize(file.path) if file.path else 0)
+                size = (
+                    len(file.bytes)
+                    if file.bytes
+                    else (os.path.getsize(file.path) if file.path else 0)
+                )
                 if size > _MAX_FILE_SIZE:
                     oversized.append(file.name)
                 else:
                     attached_files.append(file)
             if oversized:
                 page.snack_bar = flet.SnackBar(
-                    flet.Text(f"Файл(ы) превышают 100 МБ: {', '.join(oversized)}", color="#ffffff"),
-                    open=True, bgcolor="#ea4335",
+                    flet.Text(
+                        f"Файл(ы) превышают 100 МБ: {', '.join(oversized)}",
+                        color="#ffffff",
+                    ),
+                    open=True,
+                    bgcolor="#ea4335",
                 )
                 page.update()
 
@@ -107,7 +114,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         bgcolor="#ffffff",
         filled=True,
         border_color=flet.Colors.TRANSPARENT,
-        color=flet.Colors.BLACK
+        color=flet.Colors.BLACK,
     )
     print("[room_view] message_input ok")
 
@@ -126,7 +133,13 @@ def room_view(page: flet.Page, state: AppState) -> None:
     )
     print("[room_view] reconnecting_banner ok")
 
-    _state: dict = {"min_id": None, "loading_older": False, "ws_client": None, "user_at_bottom": True, "messages_data": []}
+    _state: dict = {
+        "min_id": None,
+        "loading_older": False,
+        "ws_client": None,
+        "user_at_bottom": True,
+        "messages_data": [],
+    }
 
     # User profile bottom sheet
     _profile_sheet_content = flet.Column(tight=True, spacing=8, width=320)
@@ -145,7 +158,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
     def _on_emoji_selected(emoji_char: str) -> None:
         """Insert emoji at cursor position or at end of message."""
         current_value = message_input.value or ""
-        
+
         # TextField doesn't expose cursor_position, so just append to end
         new_value = current_value + emoji_char
         message_input.value = new_value
@@ -189,9 +202,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
             _profile_sheet_content.controls += [
                 flet.Row(
                     controls=[
-                        flet.Icon(
-                            flet.Icons.ACCOUNT_CIRCLE, size=48, color="#008069"
-                        ),
+                        flet.Icon(flet.Icons.ACCOUNT_CIRCLE, size=48, color="#008069"),
                         flet.Column(
                             controls=[
                                 flet.Text(
@@ -200,9 +211,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                                     weight=flet.FontWeight.BOLD,
                                     color="#111b21",
                                 ),
-                                flet.Text(
-                                    dn, size=14, color="#667781"
-                                )
+                                flet.Text(dn, size=14, color="#667781")
                                 if dn
                                 else flet.Text(
                                     t("room.no_display_name"),
@@ -222,7 +231,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     controls=[
                         flet.Icon(flet.Icons.BADGE, size=18, color="#667781"),
                         flet.Text(
-                            t("room.username_label", username=data.get('username', '')),
+                            t("room.username_label", username=data.get("username", "")),
                             size=14,
                             color="#111b21",
                         ),
@@ -233,7 +242,9 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     controls=[
                         flet.Icon(flet.Icons.LABEL, size=18, color="#667781"),
                         flet.Text(
-                            t("room.display_name_label", name=dn or "—"), size=14, color="#111b21"
+                            t("room.display_name_label", name=dn or "—"),
+                            size=14,
+                            color="#111b21",
                         ),
                     ],
                     spacing=8,
@@ -247,9 +258,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
             page.update()
         except Exception as exc:
             _profile_sheet_content.controls.clear()
-            _profile_sheet_content.controls.append(
-                flet.Text(str(exc), color="#ea4335")
-            )
+            _profile_sheet_content.controls.append(flet.Text(str(exc), color="#ea4335"))
             page.update()
         finally:
             await client.aclose()
@@ -267,10 +276,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         if isinstance(ts_raw, str) and "T" in ts_raw:
             ts = ts_raw.split("T")[1][:5]
 
-        is_me = (
-            state.current_user is not None
-            and author == state.current_user.username
-        )
+        is_me = state.current_user is not None and author == state.current_user.username
 
         alignment = state.message_alignment
         if alignment == "right":
@@ -315,7 +321,8 @@ def room_view(page: flet.Page, state: AppState) -> None:
                             decryptor = FileDecryptor()
                             is_own = (
                                 state.current_user is not None
-                                and file_meta.get("uploader_id") == state.current_user.id
+                                and file_meta.get("uploader_id")
+                                == state.current_user.id
                             )
 
                             if is_own and file_meta.get("key_sender_blob"):
@@ -324,21 +331,38 @@ def room_view(page: flet.Page, state: AppState) -> None:
                                     key_sender_blob_b64=file_meta["key_sender_blob"],
                                     x25519_priv=state.x25519_private,
                                 )
-                            elif file_meta.get("key_blob") and file_meta.get("key_signature"):
+                            elif file_meta.get("key_blob") and file_meta.get(
+                                "key_signature"
+                            ):
                                 # Need sender public key
                                 sender_keys = None
-                                sender_username = file_meta.get("uploader_username") or file_meta.get("author_username")
+                                sender_username = file_meta.get(
+                                    "uploader_username"
+                                ) or file_meta.get("author_username")
                                 if sender_username and state.public_key_cache:
-                                    sender_keys = state.public_key_cache.get_public_keys(sender_username)
+                                    sender_keys = (
+                                        state.public_key_cache.get_public_keys(
+                                            sender_username
+                                        )
+                                    )
                                 if not sender_keys and sender_username:
                                     _kc = APIClient(base_url=API_URL, state=state)
                                     try:
                                         kd = await _kc.get_public_keys(sender_username)
-                                        ed_pub = KeyGenerator.load_ed25519_public_key(base64.b64decode(kd["identity_pub_ed25519"]))
-                                        x_pub = KeyGenerator.load_x25519_public_key(base64.b64decode(kd["identity_pub_x25519"]))
-                                        sender_keys = {"ed25519_pub": ed_pub, "x25519_pub": x_pub}
+                                        ed_pub = KeyGenerator.load_ed25519_public_key(
+                                            base64.b64decode(kd["identity_pub_ed25519"])
+                                        )
+                                        x_pub = KeyGenerator.load_x25519_public_key(
+                                            base64.b64decode(kd["identity_pub_x25519"])
+                                        )
+                                        sender_keys = {
+                                            "ed25519_pub": ed_pub,
+                                            "x25519_pub": x_pub,
+                                        }
                                         if state.public_key_cache:
-                                            state.public_key_cache.set_public_keys(sender_username, ed_pub, x_pub)
+                                            state.public_key_cache.set_public_keys(
+                                                sender_username, ed_pub, x_pub
+                                            )
                                     finally:
                                         await _kc.aclose()
 
@@ -352,10 +376,16 @@ def room_view(page: flet.Page, state: AppState) -> None:
                                     )
                         except Exception as dec_exc:
                             import logging
-                            logging.error(f"[FILE] Decryption failed: {dec_exc}", exc_info=True)
+
+                            logging.error(
+                                f"[FILE] Decryption failed: {dec_exc}", exc_info=True
+                            )
                             page.snack_bar = flet.SnackBar(
-                                flet.Text(f"Decryption failed: {dec_exc}", color="#fff"),
-                                open=True, bgcolor="#ea4335",
+                                flet.Text(
+                                    f"Decryption failed: {dec_exc}", color="#fff"
+                                ),
+                                open=True,
+                                bgcolor="#ea4335",
                             )
                             page.update()
                             return
@@ -413,12 +443,14 @@ def room_view(page: flet.Page, state: AppState) -> None:
                                     ),
                                 ],
                             ),
-
                             flet.IconButton(
                                 icon=flet.Icons.DOWNLOAD,
                                 icon_size=18,
                                 tooltip="Download",
-                                on_click=lambda e, fid=file_id_val, fn=file_name_val, fm=file_item: page.run_task(
+                                on_click=lambda e,
+                                fid=file_id_val,
+                                fn=file_name_val,
+                                fm=file_item: page.run_task(
                                     local_download_task,
                                     fid,
                                     fn,
@@ -494,7 +526,11 @@ def room_view(page: flet.Page, state: AppState) -> None:
         # Set initial state (bubble is the first control — either spacer or container)
         # Find the Container (bubble) — it's always the non-spacer control
         container = next(
-            (c for c in message_control.controls if isinstance(c, flet.Container) and c.content is not None),
+            (
+                c
+                for c in message_control.controls
+                if isinstance(c, flet.Container) and c.content is not None
+            ),
             None,
         )
         if container is None:
@@ -511,6 +547,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         print("[SCROLL] Starting smooth scroll to bottom...")
         # Small delay to ensure UI is rendered
         import asyncio
+
         await asyncio.sleep(0.1)
         await messages_list.scroll_to(
             offset=-1,
@@ -528,7 +565,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         """Decrypt message if it's encrypted, otherwise return as-is."""
         if not msg.get("is_encrypted"):
             return msg
-        
+
         # If current user is the sender, decrypt using the sender's own copy
         if (
             state.current_user is not None
@@ -548,27 +585,29 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
             try:
                 decryptor = MessageDecryptor()
-                msg["body"] = decryptor.decrypt_own_message(sender_blob, state.x25519_private)
+                msg["body"] = decryptor.decrypt_own_message(
+                    sender_blob, state.x25519_private
+                )
                 msg["decrypted"] = True
             except (InvalidTag, Exception) as exc:
                 logging.error(f"[DECRYPT] Failed to decrypt own message: {exc}")
                 msg["body"] = t("room.encrypted_sent")
             return msg
-        
+
         # Message is encrypted, attempt to decrypt
         import base64
         import logging
         from crypto.message_crypto import MessageDecryptor
         from crypto.key_generator import KeyGenerator
         from cryptography.exceptions import InvalidSignature, InvalidTag
-        
+
         try:
             if not state.x25519_private or not state.ed25519_private:
                 logging.warning("[DECRYPT] No private keys available")
                 msg["body"] = t("room.encrypted_no_keys")
                 msg["decryption_error"] = True
                 return msg
-            
+
             # Get sender public keys
             sender_username = msg.get("author_username")
             if not sender_username:
@@ -576,63 +615,72 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 msg["body"] = t("room.encrypted_unknown_sender")
                 msg["decryption_error"] = True
                 return msg
-            
+
             sender_keys = None
             if state.public_key_cache:
                 sender_keys = state.public_key_cache.get_public_keys(sender_username)
-            
+
             if not sender_keys:
                 logging.info(f"[DECRYPT] Fetching public keys for {sender_username}")
                 client = APIClient(base_url=API_URL, state=state)
                 try:
                     keys_data = await client.get_public_keys(sender_username)
-                    ed25519_pub_bytes = base64.b64decode(keys_data["identity_pub_ed25519"])
-                    x25519_pub_bytes = base64.b64decode(keys_data["identity_pub_x25519"])
-                    
-                    ed25519_pub = KeyGenerator.load_ed25519_public_key(ed25519_pub_bytes)
+                    ed25519_pub_bytes = base64.b64decode(
+                        keys_data["identity_pub_ed25519"]
+                    )
+                    x25519_pub_bytes = base64.b64decode(
+                        keys_data["identity_pub_x25519"]
+                    )
+
+                    ed25519_pub = KeyGenerator.load_ed25519_public_key(
+                        ed25519_pub_bytes
+                    )
                     x25519_pub = KeyGenerator.load_x25519_public_key(x25519_pub_bytes)
-                    
+
                     sender_keys = {"ed25519_pub": ed25519_pub, "x25519_pub": x25519_pub}
                     if state.public_key_cache:
-                        state.public_key_cache.set_public_keys(sender_username, ed25519_pub, x25519_pub)
+                        state.public_key_cache.set_public_keys(
+                            sender_username, ed25519_pub, x25519_pub
+                        )
                 finally:
                     await client.aclose()
-            
+
             # Decrypt message
             encrypted_blob = msg.get("encrypted_blob")
             signature = msg.get("signature")
-            
+
             if not encrypted_blob or not signature:
                 logging.warning("[DECRYPT] Missing encrypted_blob or signature")
                 msg["body"] = t("room.encrypted_malformed")
                 msg["decryption_error"] = True
                 return msg
-            
+
             logging.info(f"[DECRYPT] Decrypting message from {sender_username}")
             decryptor = MessageDecryptor()
-            encrypted_data = {
-                "blob": encrypted_blob,
-                "signature": signature
-            }
-            
+            encrypted_data = {"blob": encrypted_blob, "signature": signature}
+
             plaintext = decryptor.decrypt_message(
                 encrypted_msg=encrypted_data,
                 recipient_x25519_priv=state.x25519_private,
-                sender_ed25519_pub=sender_keys["ed25519_pub"]
+                sender_ed25519_pub=sender_keys["ed25519_pub"],
             )
-            
+
             msg["body"] = plaintext
             msg["decrypted"] = True
             logging.info("[DECRYPT] Message decrypted successfully")
             return msg
-            
+
         except InvalidSignature:
-            logging.error(f"[DECRYPT] Signature verification failed for message from {sender_username}")
+            logging.error(
+                f"[DECRYPT] Signature verification failed for message from {sender_username}"
+            )
             msg["body"] = t("room.encrypted_bad_signature")
             msg["signature_error"] = True
             return msg
         except InvalidTag:
-            logging.error(f"[DECRYPT] Decryption failed for message from {sender_username}")
+            logging.error(
+                f"[DECRYPT] Decryption failed for message from {sender_username}"
+            )
             msg["body"] = t("room.encrypted_bad_key")
             msg["decryption_error"] = True
             return msg
@@ -643,7 +691,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
             return msg
 
     def _on_ws_message(payload: dict) -> None:
-        print(f"[WS] Received raw payload: {payload}") # Log raw payload
+        print(f"[WS] Received raw payload: {payload}")  # Log raw payload
 
         msg_type = payload.get("type")
 
@@ -654,7 +702,8 @@ def room_view(page: flet.Page, state: AppState) -> None:
             msg: dict = {
                 "id": raw.get("message_id") or raw.get("id"),
                 "room_id": raw.get("room_id"),
-                "author_username": raw.get("sender_username") or raw.get("author_username"),
+                "author_username": raw.get("sender_username")
+                or raw.get("author_username"),
                 "author_display_name": raw.get("author_display_name"),
                 "body": "",
                 "created_at": raw.get("created_at", ""),
@@ -684,42 +733,52 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
         if msg_type == "message":
             msg = payload.get("payload", payload)
-            print(f"[WS] Processed message payload: {msg}") # Log processed message
-            print(f"[WS] Files section in message: {msg.get('files', [])}") # Log files section
+            print(f"[WS] Processed message payload: {msg}")  # Log processed message
+            print(
+                f"[WS] Files section in message: {msg.get('files', [])}"
+            )  # Log files section
 
             # Decrypt message if encrypted
             if msg.get("is_encrypted"):
                 print("[WS] Message is encrypted, decrypting...")
+
                 # Run decryption in async task
                 async def decrypt_and_display():
                     decrypted_msg = await _decrypt_message_if_needed(msg)
-                    
+
                     # Check if this is our own message (optimistic update already shown)
                     is_own_message = (
                         state.current_user is not None
-                        and decrypted_msg.get("author_username") == state.current_user.username
+                        and decrypted_msg.get("author_username")
+                        == state.current_user.username
                     )
-                    
+
                     # Check if we already have this message (by temporary ID or real ID)
                     msg_id = decrypted_msg.get("id")
                     temp_id = decrypted_msg.get("temp_id")
                     already_exists = False
-                    
+
                     if is_own_message:
                         # Look for temporary message with matching temp_id or body
                         for i, existing_msg in enumerate(_state["messages_data"]):
-                            if existing_msg.get("temp_id") == temp_id or existing_msg.get("is_optimistic"):
+                            if existing_msg.get(
+                                "temp_id"
+                            ) == temp_id or existing_msg.get("is_optimistic"):
                                 # Keep the original body from the optimistic message (encrypted
                                 # outgoing messages can't be decrypted by the sender)
                                 if decrypted_msg.get("is_encrypted"):
-                                    decrypted_msg["body"] = existing_msg.get("body", decrypted_msg.get("body", ""))
+                                    decrypted_msg["body"] = existing_msg.get(
+                                        "body", decrypted_msg.get("body", "")
+                                    )
                                 # Replace optimistic message with real one
                                 _state["messages_data"][i] = decrypted_msg
-                                messages_list.controls[i] = _build_message_tile(decrypted_msg)
+                                messages_list.controls[i] = _build_message_tile(
+                                    decrypted_msg
+                                )
                                 already_exists = True
                                 print("[WS] Replaced optimistic message with real one")
                                 break
-                    
+
                     if not already_exists:
                         user_at_bottom = _is_user_at_bottom()
                         print(f"[WS] User at bottom: {user_at_bottom}")
@@ -727,15 +786,17 @@ def room_view(page: flet.Page, state: AppState) -> None:
                         _state["messages_data"].append(decrypted_msg)
                         message_control = _build_message_tile(decrypted_msg)
                         messages_list.controls.append(message_control)
-                        print(f"[WS] Added message to list, total messages: {len(messages_list.controls)}")
-                        
+                        print(
+                            f"[WS] Added message to list, total messages: {len(messages_list.controls)}"
+                        )
+
                         reconnecting_banner.visible = False
                         _animate_message(message_control)
                         print("[WS] Animated message")
-                    
+
                     page.update()
                     print("[WS] Updated page")
-                    
+
                     # Only scroll to bottom if user was already at bottom
                     if not already_exists:
                         user_at_bottom = _is_user_at_bottom()
@@ -744,7 +805,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                             page.run_task(_smooth_scroll_to_bottom)
                         else:
                             print("[WS] Not scrolling - user not at bottom")
-                
+
                 page.run_task(decrypt_and_display)
                 return
 
@@ -753,18 +814,18 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 state.current_user is not None
                 and msg.get("author_username") == state.current_user.username
             )
-            
+
             # Check if we already have this message (by temporary ID or real ID)
             msg_id = msg.get("id")
             temp_id = msg.get("temp_id")
             already_exists = False
-            
+
             if is_own_message:
                 # Look for temporary message with matching temp_id or body
                 for i, existing_msg in enumerate(_state["messages_data"]):
                     if existing_msg.get("temp_id") == temp_id or (
-                        existing_msg.get("is_optimistic") and 
-                        existing_msg.get("body") == msg.get("body")
+                        existing_msg.get("is_optimistic")
+                        and existing_msg.get("body") == msg.get("body")
                     ):
                         # Replace optimistic message with real one
                         _state["messages_data"][i] = msg
@@ -772,7 +833,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                         already_exists = True
                         print("[WS] Replaced optimistic message with real one")
                         break
-            
+
             if not already_exists:
                 user_at_bottom = _is_user_at_bottom()
                 print(f"[WS] User at bottom: {user_at_bottom}")
@@ -780,15 +841,17 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 _state["messages_data"].append(msg)
                 message_control = _build_message_tile(msg)
                 messages_list.controls.append(message_control)
-                print(f"[WS] Added message to list, total messages: {len(messages_list.controls)}")
-                
+                print(
+                    f"[WS] Added message to list, total messages: {len(messages_list.controls)}"
+                )
+
                 reconnecting_banner.visible = False
                 _animate_message(message_control)
                 print("[WS] Animated message")
-            
+
             page.update()
             print("[WS] Updated page")
-            
+
             # Only scroll to bottom if user was already at bottom
             if not already_exists:
                 user_at_bottom = _is_user_at_bottom()
@@ -805,13 +868,13 @@ def room_view(page: flet.Page, state: AppState) -> None:
     async def _load_messages(before_id: int | None = None) -> list[dict]:
         client = APIClient(base_url=API_URL, state=state)
         try:
-            return await client.get_messages(
-                room.id, before_id=before_id, limit=50
-            )
+            return await client.get_messages(room.id, before_id=before_id, limit=50)
         except AuthError:
             state.token = None
             page.snack_bar = flet.SnackBar(
-                flet.Text(t("room.session_expired"), color="#ffffff"), open=True, bgcolor="#ea4335"
+                flet.Text(t("room.session_expired"), color="#ffffff"),
+                open=True,
+                bgcolor="#ea4335",
             )
             page.update()
             from views.login_view import login_view
@@ -819,7 +882,9 @@ def room_view(page: flet.Page, state: AppState) -> None:
             login_view(page, state)
             return []
         except Exception as exc:
-            page.snack_bar = flet.SnackBar(flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335")
+            page.snack_bar = flet.SnackBar(
+                flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335"
+            )
             page.update()
             return []
         finally:
@@ -843,7 +908,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         msgs = await _load_messages()
         msgs_sorted = sorted(msgs, key=lambda m: m["id"])
         print(f"[INIT] Loaded {len(msgs_sorted)} messages")
-        
+
         # Decrypt encrypted messages
         decrypted_msgs = []
         for m in msgs_sorted:
@@ -853,17 +918,17 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 decrypted_msgs.append(decrypted_msg)
             else:
                 decrypted_msgs.append(m)
-        
+
         if decrypted_msgs:
             _state["min_id"] = decrypted_msgs[0]["id"]
             _state["messages_data"] = decrypted_msgs
             for m in decrypted_msgs:
                 messages_list.controls.append(_build_message_tile(m))
             print(f"[INIT] Added {len(decrypted_msgs)} messages to UI")
-        
+
         page.update()
         print("[INIT] Updated page, now scrolling to bottom...")
-        
+
         # Ensure user is marked as at bottom for initial load
         _state["user_at_bottom"] = True
         await _smooth_scroll_to_bottom()
@@ -876,7 +941,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         msgs = await _load_messages(before_id=_state["min_id"])
         if msgs:
             msgs_sorted = sorted(msgs, key=lambda m: m["id"])
-            
+
             # Decrypt encrypted messages
             decrypted_msgs = []
             for m in msgs_sorted:
@@ -886,7 +951,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     decrypted_msgs.append(decrypted_msg)
                 else:
                     decrypted_msgs.append(m)
-            
+
             _state["min_id"] = decrypted_msgs[0]["id"]
             new_tiles = [_build_message_tile(m) for m in decrypted_msgs]
             # Insert older messages at the top (data too)
@@ -920,38 +985,43 @@ def room_view(page: flet.Page, state: AppState) -> None:
             # Mark user as "at bottom" when sending a message
             print("[SEND] Setting user_at_bottom = True")
             _state["user_at_bottom"] = True
-            
+
             # Resolve emoji shortcodes before sending
             resolved_body = resolve_shortcodes(body)
-            
+
             # Create optimistic message for immediate display
             import time
+
             temp_id = f"temp_{int(time.time() * 1000)}"
             optimistic_msg = {
                 "id": None,
                 "temp_id": temp_id,
                 "body": resolved_body,
                 "files": [],
-                "author_username": state.current_user.username if state.current_user else "?",
-                "author_display_name": state.current_user.display_name if state.current_user else None,
+                "author_username": state.current_user.username
+                if state.current_user
+                else "?",
+                "author_display_name": state.current_user.display_name
+                if state.current_user
+                else None,
                 "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                 "is_optimistic": True,
             }
-            
+
             # Add optimistic message to UI immediately
             _state["messages_data"].append(optimistic_msg)
             message_control = _build_message_tile(optimistic_msg)
             messages_list.controls.append(message_control)
             _animate_message(message_control)
-            
+
             # Clear input and update UI
             message_input.value = ""
             print("[SEND] Cleared input field and added optimistic message")
             page.update()
-            
+
             # Scroll to bottom
             page.run_task(_smooth_scroll_to_bottom)
-            
+
             # Send message via WebSocket or encrypted API
             print("[SEND] Sending message...")
             client = APIClient(base_url=API_URL, state=state)
@@ -978,7 +1048,9 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
                     if is_personal and state.ed25519_private and state.x25519_private:
                         parts = room.name.split(", ")
-                        _recipient = next((p for p in parts if p != state.current_user.username), None)
+                        _recipient = next(
+                            (p for p in parts if p != state.current_user.username), None
+                        )
                         if _recipient:
                             try:
                                 import base64
@@ -987,16 +1059,39 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
                                 r_keys = None
                                 if state.public_key_cache:
-                                    r_keys = state.public_key_cache.get_public_keys(_recipient)
+                                    r_keys = state.public_key_cache.get_public_keys(
+                                        _recipient
+                                    )
                                 if not r_keys:
                                     _kc = APIClient(base_url=API_URL, state=state)
                                     try:
                                         kd = await _kc.get_public_keys(_recipient)
-                                        r_x25519_pub = KeyGenerator.load_x25519_public_key(base64.b64decode(kd["identity_pub_x25519"]))
-                                        r_ed25519_pub = KeyGenerator.load_ed25519_public_key(base64.b64decode(kd["identity_pub_ed25519"]))
-                                        r_keys = {"x25519_pub": r_x25519_pub, "ed25519_pub": r_ed25519_pub, "user_id": kd.get("user_id", "")}
+                                        r_x25519_pub = (
+                                            KeyGenerator.load_x25519_public_key(
+                                                base64.b64decode(
+                                                    kd["identity_pub_x25519"]
+                                                )
+                                            )
+                                        )
+                                        r_ed25519_pub = (
+                                            KeyGenerator.load_ed25519_public_key(
+                                                base64.b64decode(
+                                                    kd["identity_pub_ed25519"]
+                                                )
+                                            )
+                                        )
+                                        r_keys = {
+                                            "x25519_pub": r_x25519_pub,
+                                            "ed25519_pub": r_ed25519_pub,
+                                            "user_id": kd.get("user_id", ""),
+                                        }
                                         if state.public_key_cache:
-                                            state.public_key_cache.set_public_keys(_recipient, r_ed25519_pub, r_x25519_pub, str(kd.get("user_id", "")))
+                                            state.public_key_cache.set_public_keys(
+                                                _recipient,
+                                                r_ed25519_pub,
+                                                r_x25519_pub,
+                                                str(kd.get("user_id", "")),
+                                            )
                                     finally:
                                         await _kc.aclose()
 
@@ -1016,7 +1111,11 @@ def room_view(page: flet.Page, state: AppState) -> None:
                                 key_signature = result["signature"]
                             except Exception as enc_exc:
                                 import logging
-                                logging.error(f"[FILE] Encryption failed: {enc_exc}", exc_info=True)
+
+                                logging.error(
+                                    f"[FILE] Encryption failed: {enc_exc}",
+                                    exc_info=True,
+                                )
 
                     async with httpx.AsyncClient() as http:
                         data = {}
@@ -1036,47 +1135,78 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 # Check if this is a personal chat and we should encrypt
                 should_encrypt = False
                 recipient_username = None
-                
+
                 if is_personal and state.ed25519_private and state.x25519_private:
                     # Extract recipient username from room name
                     # Personal chat names are formatted as "user1, user2"
                     parts = room.name.split(", ")
-                    recipient_username = next((p for p in parts if p != state.current_user.username), None)
-                    
+                    recipient_username = next(
+                        (p for p in parts if p != state.current_user.username), None
+                    )
+
                     if recipient_username:
-                        print(f"[SEND] Personal chat detected, attempting E2EE with {recipient_username}")
+                        print(
+                            f"[SEND] Personal chat detected, attempting E2EE with {recipient_username}"
+                        )
                         should_encrypt = True
-                
+
                 if should_encrypt and recipient_username:
                     try:
                         import base64
                         import logging
                         from crypto.message_crypto import MessageEncryptor
                         from crypto.key_generator import KeyGenerator
-                        
+
                         # Fetch recipient public keys
                         recipient_keys = None
                         keys_data = None
                         if state.public_key_cache:
-                            recipient_keys = state.public_key_cache.get_public_keys(recipient_username)
-                        
+                            recipient_keys = state.public_key_cache.get_public_keys(
+                                recipient_username
+                            )
+
                         if not recipient_keys:
-                            logging.info(f"[SEND] Fetching public keys for {recipient_username}")
+                            logging.info(
+                                f"[SEND] Fetching public keys for {recipient_username}"
+                            )
                             keys_data = await client.get_public_keys(recipient_username)
-                            ed25519_pub_bytes = base64.b64decode(keys_data["identity_pub_ed25519"])
-                            x25519_pub_bytes = base64.b64decode(keys_data["identity_pub_x25519"])
-                            
-                            ed25519_pub = KeyGenerator.load_ed25519_public_key(ed25519_pub_bytes)
-                            x25519_pub = KeyGenerator.load_x25519_public_key(x25519_pub_bytes)
-                            
-                            recipient_keys = {"ed25519_pub": ed25519_pub, "x25519_pub": x25519_pub, "user_id": keys_data.get("user_id", "")}
+                            ed25519_pub_bytes = base64.b64decode(
+                                keys_data["identity_pub_ed25519"]
+                            )
+                            x25519_pub_bytes = base64.b64decode(
+                                keys_data["identity_pub_x25519"]
+                            )
+
+                            ed25519_pub = KeyGenerator.load_ed25519_public_key(
+                                ed25519_pub_bytes
+                            )
+                            x25519_pub = KeyGenerator.load_x25519_public_key(
+                                x25519_pub_bytes
+                            )
+
+                            recipient_keys = {
+                                "ed25519_pub": ed25519_pub,
+                                "x25519_pub": x25519_pub,
+                                "user_id": keys_data.get("user_id", ""),
+                            }
                             if state.public_key_cache:
-                                state.public_key_cache.set_public_keys(recipient_username, ed25519_pub, x25519_pub, str(keys_data.get("user_id", "")))
-                        
-                        recipient_id = str(recipient_keys.get("user_id", "") if isinstance(recipient_keys, dict) else "")
-                        
+                                state.public_key_cache.set_public_keys(
+                                    recipient_username,
+                                    ed25519_pub,
+                                    x25519_pub,
+                                    str(keys_data.get("user_id", "")),
+                                )
+
+                        recipient_id = str(
+                            recipient_keys.get("user_id", "")
+                            if isinstance(recipient_keys, dict)
+                            else ""
+                        )
+
                         # Encrypt message
-                        logging.info(f"[SEND] Encrypting message for {recipient_username}")
+                        logging.info(
+                            f"[SEND] Encrypting message for {recipient_username}"
+                        )
                         encryptor = MessageEncryptor()
                         encrypted_data = encryptor.encrypt_message(
                             plaintext=resolved_body,
@@ -1084,9 +1214,9 @@ def room_view(page: flet.Page, state: AppState) -> None:
                             sender_ed25519_priv=state.ed25519_private,
                             sender_x25519_pub=state.x25519_private.public_key(),
                             sender_id=str(state.current_user.id),
-                            recipient_id=recipient_id
+                            recipient_id=recipient_id,
                         )
-                        
+
                         # Send encrypted message via API
                         logging.info("[SEND] Sending encrypted message via API")
                         await client.send_encrypted_message(
@@ -1100,14 +1230,21 @@ def room_view(page: flet.Page, state: AppState) -> None:
                         logging.info("[SEND] Encrypted message sent successfully")
                     except Exception as enc_exc:
                         import logging
-                        logging.error(f"[SEND] Encryption/send failed: {enc_exc}", exc_info=True)
+
+                        logging.error(
+                            f"[SEND] Encryption/send failed: {enc_exc}", exc_info=True
+                        )
                         # Remove the optimistic message — it was never delivered
-                        if _state["messages_data"] and _state["messages_data"][-1].get("is_optimistic"):
+                        if _state["messages_data"] and _state["messages_data"][-1].get(
+                            "is_optimistic"
+                        ):
                             _state["messages_data"].pop()
                             if messages_list.controls:
                                 messages_list.controls.pop()
                         page.snack_bar = flet.SnackBar(
-                            flet.Text(t("room.send_error", exc=enc_exc), color="#ffffff"),
+                            flet.Text(
+                                t("room.send_error", exc=enc_exc), color="#ffffff"
+                            ),
                             open=True,
                             bgcolor="#ea4335",
                         )
@@ -1135,7 +1272,9 @@ def room_view(page: flet.Page, state: AppState) -> None:
             print("[SEND] Message sent")
         except Exception as exc:
             print(f"[SEND] Error sending message: {exc}")
-            page.snack_bar = flet.SnackBar(flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335")
+            page.snack_bar = flet.SnackBar(
+                flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335"
+            )
             page.update()
 
     def _on_scroll(e: flet.OnScrollEvent) -> None:
@@ -1144,15 +1283,19 @@ def room_view(page: flet.Page, state: AppState) -> None:
             distance_from_bottom = e.max_scroll_extent - e.pixels
             was_at_bottom = _state.get("user_at_bottom", True)
             is_at_bottom = distance_from_bottom < 100
-            
+
             if was_at_bottom != is_at_bottom:
-                print(f"[SCROLL] User position changed: at_bottom={is_at_bottom} (distance={distance_from_bottom:.1f}px)")
-            
+                print(
+                    f"[SCROLL] User position changed: at_bottom={is_at_bottom} (distance={distance_from_bottom:.1f}px)"
+                )
+
             _state["user_at_bottom"] = is_at_bottom
-            
+
             # Load older messages when scrolled to top
             if e.pixels <= 50:
-                print(f"[SCROLL] Near top (pixels={e.pixels}), loading older messages...")
+                print(
+                    f"[SCROLL] Near top (pixels={e.pixels}), loading older messages..."
+                )
                 page.run_task(_load_older)
 
     messages_list.on_scroll = _on_scroll
@@ -1173,7 +1316,9 @@ def room_view(page: flet.Page, state: AppState) -> None:
             state.ws._on_reconnecting = _on_reconnecting
             state.ws.set_room(room.id)
             _state["ws_client"] = state.ws
-            logger.debug("[room_view] Reusing existing WS, switched to room %s", room.id)
+            logger.debug(
+                "[room_view] Reusing existing WS, switched to room %s", room.id
+            )
             return
 
         # No existing connection — create a new unified client
@@ -1197,6 +1342,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         _state["ws_client"] = None
         state.active_room = None
         from views.chat_list_view import chat_list_view
+
         chat_list_view(page, state)
 
     def _go_settings(e: flet.ControlEvent) -> None:
@@ -1222,9 +1368,9 @@ def room_view(page: flet.Page, state: AppState) -> None:
             invite_dialog.open = False
             invite_username_field.value = ""
             page.snack_bar = flet.SnackBar(
-                flet.Text(t("room.invite_success", username=username), color="#ffffff"), 
-                open=True, 
-                bgcolor="#008069"
+                flet.Text(t("room.invite_success", username=username), color="#ffffff"),
+                open=True,
+                bgcolor="#008069",
             )
             page.update()
         except Exception as exc:
@@ -1235,11 +1381,23 @@ def room_view(page: flet.Page, state: AppState) -> None:
             await client.aclose()
 
     invite_dialog = flet.AlertDialog(
-        title=flet.Text(t("room.invite_user"), weight=flet.FontWeight.BOLD, color="#111b21"),
-        content=flet.Column(controls=[invite_username_field, invite_error], tight=True, spacing=8),
+        title=flet.Text(
+            t("room.invite_user"), weight=flet.FontWeight.BOLD, color="#111b21"
+        ),
+        content=flet.Column(
+            controls=[invite_username_field, invite_error], tight=True, spacing=8
+        ),
         actions=[
-            flet.TextButton(t("room.cancel"), on_click=lambda e: _close_invite_dialog(), style=flet.ButtonStyle(color="#008069")),
-            flet.ElevatedButton(t("room.invite"), on_click=_do_invite, style=flet.ButtonStyle(bgcolor="#008069", color="#ffffff")),
+            flet.TextButton(
+                t("room.cancel"),
+                on_click=lambda e: _close_invite_dialog(),
+                style=flet.ButtonStyle(color="#008069"),
+            ),
+            flet.ElevatedButton(
+                t("room.invite"),
+                on_click=_do_invite,
+                style=flet.ButtonStyle(bgcolor="#008069", color="#ffffff"),
+            ),
         ],
     )
 
@@ -1269,12 +1427,14 @@ def room_view(page: flet.Page, state: AppState) -> None:
             name = room.name
             if state.current_user and state.current_user.username in name:
                 parts = name.split(", ")
-                return next((p for p in parts if p != state.current_user.username), name)
+                return next(
+                    (p for p in parts if p != state.current_user.username), name
+                )
             return name
         return room.name
 
     display_name = _get_display_name()
-    
+
     # Подзаголовок в зависимости от типа чата
     def _get_subtitle() -> str:
         if is_personal:
@@ -1344,7 +1504,9 @@ def room_view(page: flet.Page, state: AppState) -> None:
     print("[room_view] creating FormattingToolbar...")
     formatting_toolbar = FormattingToolbar(
         get_value=lambda: message_input.value or "",
-        set_value=lambda v: setattr(message_input, 'value', v),  # No need for page.update()
+        set_value=lambda v: setattr(
+            message_input, "value", v
+        ),  # No need for page.update()
         get_cursor=lambda: None,  # Flet TextField doesn't expose cursor_position
         text_field=message_input,  # Pass TextField reference for selection support
         disabled=False,  # For now, use False since there's no read-only state
@@ -1379,12 +1541,12 @@ def room_view(page: flet.Page, state: AppState) -> None:
                                         icon_size=24,
                                     ),
                                     flet.IconButton(
-                                icon=flet.Icons.ATTACH_FILE,
-                                on_click=pick_file,
-                                icon_color="#008069",
-                                tooltip="Attach file",
-                            ),
-                            message_input,
+                                        icon=flet.Icons.ATTACH_FILE,
+                                        on_click=pick_file,
+                                        icon_color="#008069",
+                                        tooltip="Attach file",
+                                    ),
+                                    message_input,
                                     flet.IconButton(
                                         icon=flet.Icons.SEND,
                                         on_click=lambda e: page.run_task(_send_message),

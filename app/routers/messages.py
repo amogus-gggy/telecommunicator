@@ -9,7 +9,12 @@ from app.auth.deps import get_current_user
 from app.db.deps import get_db
 from app.models.message import Message
 from app.models.user import User
-from app.schemas.messages import EncryptedMessageResponse, MessageResponse, SendEncryptedMessageRequest, SendMessageResponse
+from app.schemas.messages import (
+    EncryptedMessageResponse,
+    MessageResponse,
+    SendEncryptedMessageRequest,
+    SendMessageResponse,
+)
 from app.services.message_service import get_message_history, send_encrypted_message
 
 router = APIRouter(tags=["messages"])
@@ -29,12 +34,16 @@ async def send_message_encrypted(
     try:
         encrypted_blob_bytes = base64.b64decode(body.encrypted_blob)
     except Exception:
-        raise HTTPException(status_code=400, detail="encrypted_blob is not valid base64")
+        raise HTTPException(
+            status_code=400, detail="encrypted_blob is not valid base64"
+        )
 
     try:
         sender_encrypted_blob_bytes = base64.b64decode(body.sender_encrypted_blob)
     except Exception:
-        raise HTTPException(status_code=400, detail="sender_encrypted_blob is not valid base64")
+        raise HTTPException(
+            status_code=400, detail="sender_encrypted_blob is not valid base64"
+        )
 
     try:
         signature_bytes = base64.b64decode(body.signature)
@@ -85,8 +94,12 @@ async def get_encrypted_messages(
                 message_id=msg.id,
                 sender_id=sender.id,
                 sender_username=sender.username,
-                encrypted_blob=base64.b64encode(msg.encrypted_blob).decode() if msg.encrypted_blob else "",
-                signature=base64.b64encode(msg.signature).decode() if msg.signature else "",
+                encrypted_blob=base64.b64encode(msg.encrypted_blob).decode()
+                if msg.encrypted_blob
+                else "",
+                signature=base64.b64encode(msg.signature).decode()
+                if msg.signature
+                else "",
                 created_at=msg.created_at,
             )
         )
@@ -108,7 +121,9 @@ async def delete_message(
     if msg is None:
         raise HTTPException(status_code=404, detail="Message not found")
     if msg.recipient_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to delete this message")
+        raise HTTPException(
+            status_code=403, detail="Not authorized to delete this message"
+        )
     await db.delete(msg)
     await db.commit()
 

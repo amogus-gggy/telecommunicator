@@ -17,9 +17,15 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
     # E2EE fields
-    identity_pub_ed25519: Mapped[bytes | None] = mapped_column(LargeBinary(32), nullable=True)
-    identity_pub_x25519: Mapped[bytes | None] = mapped_column(LargeBinary(32), nullable=True)
+    identity_pub_ed25519: Mapped[bytes | None] = mapped_column(
+        LargeBinary(32), nullable=True
+    )
+    identity_pub_x25519: Mapped[bytes | None] = mapped_column(
+        LargeBinary(32), nullable=True
+    )
 
     # Key backup fields
     encrypted_backup: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
-    backup_version: Mapped[int] = mapped_column(default=1, nullable=False, server_default="1")
+    backup_version: Mapped[int] = mapped_column(
+        default=1, nullable=False, server_default="1"
+    )

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import flet
 
 from api.http_client import APIClient, ConflictError, ValidationError
@@ -12,6 +11,7 @@ from state import AppState, UserDTO
 def _generate_keypairs():
     """Run in a thread pool — generates both keypairs synchronously."""
     from crypto.key_generator import KeyGenerator
+
     ed25519_priv, ed25519_pub = KeyGenerator.generate_identity_keypair()
     x25519_priv, x25519_pub = KeyGenerator.generate_prekey_keypair()
     return ed25519_priv, ed25519_pub, x25519_priv, x25519_pub
@@ -22,10 +22,17 @@ def register_view(page: flet.Page, state: AppState) -> None:
     page.overlay.clear()
 
     username_field = flet.TextField(
-        label=t("register.username"), autofocus=True, bgcolor="#ffffff", border_color="#e0e0e0", color="#111b21",
+        label=t("register.username"),
+        autofocus=True,
+        bgcolor="#ffffff",
+        border_color="#e0e0e0",
+        color="#111b21",
     )
     email_field = flet.TextField(
-        label=t("register.email"), bgcolor="#ffffff", border_color="#e0e0e0", color="#111b21",
+        label=t("register.email"),
+        bgcolor="#ffffff",
+        border_color="#e0e0e0",
+        color="#111b21",
     )
     password_field = flet.TextField(
         label=t("register.password"),
@@ -74,9 +81,12 @@ def register_view(page: flet.Page, state: AppState) -> None:
 
             logging.info("[Registration] Generating keypairs (thread pool)...")
             # Run blocking key generation off the event loop
-            ed25519_priv, ed25519_pub, x25519_priv, x25519_pub = await asyncio.to_thread(
-                _generate_keypairs
-            )
+            (
+                ed25519_priv,
+                ed25519_pub,
+                x25519_priv,
+                x25519_pub,
+            ) = await asyncio.to_thread(_generate_keypairs)
 
             # Serialize public keys
             ed25519_pub_bytes = KeyGenerator.serialize_public_key(ed25519_pub)
@@ -102,14 +112,14 @@ def register_view(page: flet.Page, state: AppState) -> None:
                 password=password_field.value or "",
                 identity_pub_ed25519=ed25519_pub_b64,
                 identity_pub_x25519=x25519_pub_b64,
-                encrypted_backup=encrypted_backup_b64
+                encrypted_backup=encrypted_backup_b64,
             )
-            
+
             # Store private keys in state
             state.ed25519_private = ed25519_priv
             state.x25519_private = x25519_priv
             logging.info("[Registration] Keys stored in state")
-            
+
             token_data = await client.login(
                 username=username_field.value or "",
                 password=password_field.value or "",
@@ -123,12 +133,14 @@ def register_view(page: flet.Page, state: AppState) -> None:
                 display_name=me.get("display_name"),
             )
             from views.chat_list_view import chat_list_view
+
             chat_list_view(page, state)
         except Exception as exc:
             # Handle key generation errors
             import logging
+
             logging.error(f"[Registration] Error: {exc}", exc_info=True)
-            
+
             msg = str(exc).lower()
             if "cryptographic" in msg or "key generation" in msg:
                 general_error.value = t("register.error_crypto", exc=exc)
@@ -170,6 +182,7 @@ def register_view(page: flet.Page, state: AppState) -> None:
 
     def go_login(e: flet.ControlEvent) -> None:
         from views.login_view import login_view
+
         login_view(page, state)
 
     page.controls.clear()
@@ -188,7 +201,9 @@ def register_view(page: flet.Page, state: AppState) -> None:
                                     weight=flet.FontWeight.BOLD,
                                     color="#111b21",
                                 ),
-                                flet.Text(t("register.subtitle"), size=14, color="#667781"),
+                                flet.Text(
+                                    t("register.subtitle"), size=14, color="#667781"
+                                ),
                                 flet.Divider(height=20, color=flet.Colors.TRANSPARENT),
                                 username_field,
                                 username_error,

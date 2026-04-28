@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
-    from api.ws_client import UnifiedWsClient, WsClient, NotificationClient
+    from api.ws_client import UnifiedWsClient
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
     from crypto.key_cache import PublicKeyCache
@@ -43,6 +43,7 @@ class AppState:
     secure_storage: Any = field(default=None, repr=False)
     # Single shared WebSocket connection (room messages + notifications)
     ws: "UnifiedWsClient | None" = field(default=None, repr=False)
+
     # Backwards-compat aliases — point to the same object
     @property
     def room_ws(self) -> "UnifiedWsClient | None":
@@ -62,8 +63,11 @@ class AppState:
         # that try to clear notif_ws independently
         if value is not None:
             object.__setattr__(self, "ws", value)
+
     # Callback invoked when message_alignment changes (set by room_view)
-    on_alignment_change: "Callable[[str], None] | None" = field(default=None, repr=False)
+    on_alignment_change: "Callable[[str], None] | None" = field(
+        default=None, repr=False
+    )
     # E2EE cryptographic keys
     ed25519_private: "Ed25519PrivateKey | None" = field(default=None, repr=False)
     x25519_private: "X25519PrivateKey | None" = field(default=None, repr=False)
@@ -74,6 +78,7 @@ class AppState:
         if self.public_key_cache is None:
             try:
                 from crypto.key_cache import PublicKeyCache
+
                 self.public_key_cache = PublicKeyCache()
             except ImportError:
                 pass  # Will be initialized later when crypto module is available

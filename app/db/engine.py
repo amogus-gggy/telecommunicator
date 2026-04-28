@@ -2,11 +2,9 @@ import os
 
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
-DATABASE_URL: str = os.getenv(
-    "DATABASE_URL", "sqlite+aiosqlite:///./messenger.db"
-)
+DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./messenger.db")
 
-print(f"Database URL being used: {DATABASE_URL}") # Log the database URL
+print(f"Database URL being used: {DATABASE_URL}")  # Log the database URL
 
 _is_sqlite = DATABASE_URL.startswith("sqlite")
 

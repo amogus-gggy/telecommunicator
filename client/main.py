@@ -22,7 +22,9 @@ _SETTINGS_DIR_FALLBACK = os.path.join(os.path.dirname(__file__), "storage", "dat
 # needed for tests and sometimes android support
 _client_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_client_dir))  # workspace root
-sys.path.insert(0, _client_dir)  # client/ itself — needed for `crypto.*` imports on Android
+sys.path.insert(
+    0, _client_dir
+)  # client/ itself — needed for `crypto.*` imports on Android
 
 
 async def main(page: flet.Page) -> None:
@@ -66,6 +68,7 @@ async def main(page: flet.Page) -> None:
             state.message_alignment = stored_alignment
 
         from views.login_view import login_view
+
         login_view(page, state)
 
     except Exception as exc:
@@ -75,7 +78,12 @@ async def main(page: flet.Page) -> None:
             flet.Column(
                 controls=[
                     flet.Icon(flet.Icons.ERROR_OUTLINE, color="#ea4335", size=48),
-                    flet.Text("Ошибка запуска", size=18, weight=flet.FontWeight.BOLD, color="#111b21"),
+                    flet.Text(
+                        "Ошибка запуска",
+                        size=18,
+                        weight=flet.FontWeight.BOLD,
+                        color="#111b21",
+                    ),
                     flet.Text(str(exc), size=12, color="#667781", selectable=True),
                 ],
                 alignment=flet.MainAxisAlignment.CENTER,
@@ -99,6 +107,7 @@ async def _preload_views() -> None:
     import views.widgets.markdown_viewer  # noqa: F401
     import views.widgets.emoji_picker  # noqa: F401
     import views.widgets.formatting_toolbar  # noqa: F401
+
     print("[main] preloading done")
 
 

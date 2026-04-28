@@ -165,6 +165,7 @@ class UnifiedWsClient:
 # Backwards-compatible shims
 # ---------------------------------------------------------------------------
 
+
 class WsClient(UnifiedWsClient):
     """Shim: behaves like the old WsClient (room-only messages)."""
 

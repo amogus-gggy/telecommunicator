@@ -32,7 +32,9 @@ async def _room_to_response(room: Room, db: AsyncSession) -> RoomResponse:
     return _build_response(room, owner.username if owner else "", member_count)
 
 
-async def _rooms_to_responses(rooms: list[Room], db: AsyncSession) -> list[RoomResponse]:
+async def _rooms_to_responses(
+    rooms: list[Room], db: AsyncSession
+) -> list[RoomResponse]:
     """Batch-load owners and member counts for a list of rooms — avoids N+1."""
     if not rooms:
         return []
@@ -66,10 +68,10 @@ async def create_room(data: RoomCreate, owner: User, db: AsyncSession) -> RoomRe
             raise HTTPException(status_code=409, detail="Room name already exists")
 
     room = Room(
-        name=data.name, 
+        name=data.name,
         room_type=data.room_type,
-        owner_id=owner.id, 
-        is_private=data.is_private
+        owner_id=owner.id,
+        is_private=data.is_private,
     )
     db.add(room)
     await db.flush()
@@ -86,7 +88,7 @@ async def list_public_rooms(db: AsyncSession) -> list[RoomResponse]:
     result = await db.execute(
         select(Room).where(
             Room.is_private == False,  # noqa: E712
-            Room.room_type == "public"
+            Room.room_type == "public",
         )
     )
     rooms = result.scalars().all()
@@ -107,7 +109,9 @@ async def join_room(room_id: int, user: User, db: AsyncSession) -> RoomResponse:
     is_member = existing.scalar_one_or_none() is not None
 
     if room.is_private and not is_member:
-        raise HTTPException(status_code=403, detail="Cannot join a private room without an invite")
+        raise HTTPException(
+            status_code=403, detail="Cannot join a private room without an invite"
+        )
 
     # Track if this is a first-time join for notification purposes
     is_first_time_join = False
@@ -141,15 +145,18 @@ async def join_room(room_id: int, user: User, db: AsyncSession) -> RoomResponse:
 
         for member in existing_members:
             try:
-                await ws_manager.send_to_user(member.user_id, {
-                    "type": "member_joined",
-                    "payload": {
-                        "room_id": room_id,
-                        "room_name": room.name,
-                        "username": user.username,
-                        "joined_at": new_member.joined_at.isoformat(),
+                await ws_manager.send_to_user(
+                    member.user_id,
+                    {
+                        "type": "member_joined",
+                        "payload": {
+                            "room_id": room_id,
+                            "room_name": room.name,
+                            "username": user.username,
+                            "joined_at": new_member.joined_at.isoformat(),
+                        },
                     },
-                })
+                )
             except Exception:
                 # Notification failure must not block the join operation
                 pass
@@ -183,7 +190,9 @@ async def leave_room(room_id: int, user: User, db: AsyncSession) -> RoomResponse
     return await _room_to_response(room, db)
 
 
-async def invite_user(room_id: int, username: str, requester: User, db: AsyncSession) -> RoomResponse:
+async def invite_user(
+    room_id: int, username: str, requester: User, db: AsyncSession
+) -> RoomResponse:
     room = await db.get(Room, room_id)
     if room is None:
         raise HTTPException(status_code=404, detail="Room not found")
@@ -198,7 +207,9 @@ async def invite_user(room_id: int, username: str, requester: User, db: AsyncSes
         if req_membership.scalar_one_or_none() is None:
             raise HTTPException(status_code=403, detail="Not a member of this room")
         if not room.allow_member_invite:
-            raise HTTPException(status_code=403, detail="Members are not allowed to invite in this room")
+            raise HTTPException(
+                status_code=403, detail="Members are not allowed to invite in this room"
+            )
 
     target_result = await db.execute(select(User).where(User.username == username))
     target = target_result.scalar_one_or_none()
@@ -217,23 +228,28 @@ async def invite_user(room_id: int, username: str, requester: User, db: AsyncSes
     response = await _room_to_response(room, db)
 
     # Notify the invited user in real-time if they're connected
-    await ws_manager.send_to_user(target.id, {
-        "type": "invite",
-        "payload": {
-            "id": response.id,
-            "name": response.name,
-            "owner_username": response.owner_username,
-            "member_count": response.member_count,
-            "is_private": response.is_private,
-            "allow_member_invite": response.allow_member_invite,
-            "read_only": response.read_only,
+    await ws_manager.send_to_user(
+        target.id,
+        {
+            "type": "invite",
+            "payload": {
+                "id": response.id,
+                "name": response.name,
+                "owner_username": response.owner_username,
+                "member_count": response.member_count,
+                "is_private": response.is_private,
+                "allow_member_invite": response.allow_member_invite,
+                "read_only": response.read_only,
+            },
         },
-    })
+    )
 
     return response
 
 
-async def remove_member(room_id: int, username: str, requester: User, db: AsyncSession) -> RoomResponse:
+async def remove_member(
+    room_id: int, username: str, requester: User, db: AsyncSession
+) -> RoomResponse:
     room = await db.get(Room, room_id)
     if room is None:
         raise HTTPException(status_code=404, detail="Room not found")
@@ -247,7 +263,9 @@ async def remove_member(room_id: int, username: str, requester: User, db: AsyncS
         raise HTTPException(status_code=404, detail="User not found")
 
     if target.id == room.owner_id:
-        raise HTTPException(status_code=400, detail="Owner cannot be removed from the room")
+        raise HTTPException(
+            status_code=400, detail="Owner cannot be removed from the room"
+        )
 
     membership = await db.execute(
         select(RoomMember).where(
@@ -272,7 +290,9 @@ async def update_permissions(
         raise HTTPException(status_code=404, detail="Room not found")
 
     if room.owner_id != requester.id:
-        raise HTTPException(status_code=403, detail="Only the owner can update permissions")
+        raise HTTPException(
+            status_code=403, detail="Only the owner can update permissions"
+        )
 
     if data.allow_member_invite is not None:
         room.allow_member_invite = data.allow_member_invite
@@ -285,33 +305,39 @@ async def update_permissions(
     return await _room_to_response(room, db)
 
 
-async def create_personal_chat(target_username: str, requester: User, db: AsyncSession) -> RoomResponse:
+async def create_personal_chat(
+    target_username: str, requester: User, db: AsyncSession
+) -> RoomResponse:
     """Создает или находит существующий личный чат между двумя пользователями."""
     # Найти целевого пользователя
-    target_result = await db.execute(select(User).where(User.username == target_username))
+    target_result = await db.execute(
+        select(User).where(User.username == target_username)
+    )
     target = target_result.scalar_one_or_none()
     if target is None:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     if target.id == requester.id:
-        raise HTTPException(status_code=400, detail="Cannot create personal chat with yourself")
-    
+        raise HTTPException(
+            status_code=400, detail="Cannot create personal chat with yourself"
+        )
+
     # Проверить, существует ли уже личный чат между этими пользователями
     existing_chat = await db.execute(
         select(Room)
         .join(RoomMember, Room.id == RoomMember.room_id)
         .where(
             Room.room_type == RoomType.PERSONAL,
-            RoomMember.user_id.in_([requester.id, target.id])
+            RoomMember.user_id.in_([requester.id, target.id]),
         )
         .group_by(Room.id)
         .having(func.count(RoomMember.user_id) == 2)
     )
-    
+
     existing_room = existing_chat.scalar_one_or_none()
     if existing_room:
         return await _room_to_response(existing_room, db)
-    
+
     # Создать новый личный чат
     chat_name = f"{requester.username}, {target.username}"
     room = Room(
@@ -320,18 +346,18 @@ async def create_personal_chat(target_username: str, requester: User, db: AsyncS
         owner_id=requester.id,
         is_private=True,
         allow_member_invite=False,
-        read_only=False
+        read_only=False,
     )
     db.add(room)
     await db.flush()
-    
+
     # Добавить обоих пользователей как участников
     db.add(RoomMember(room_id=room.id, user_id=requester.id))
     db.add(RoomMember(room_id=room.id, user_id=target.id))
-    
+
     await db.commit()
     await db.refresh(room)
-    
+
     return _build_response(room, requester.username, 2)
 
 

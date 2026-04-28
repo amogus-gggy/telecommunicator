@@ -1,4 +1,5 @@
 """Unit tests for conditional rendering in room_settings_view."""
+
 from __future__ import annotations
 
 import pytest
@@ -92,12 +93,17 @@ class TestRoomSettingsConditionalRendering:
         room = _make_room("group")
         assert hasattr(room, "room_type")
 
-    @pytest.mark.parametrize("room_type,expected_hide", [
-        ("personal", True),
-        ("group", False),
-        ("public", False),
-    ])
-    def test_hide_toggles_logic_for_all_room_types(self, room_type: str, expected_hide: bool):
+    @pytest.mark.parametrize(
+        "room_type,expected_hide",
+        [
+            ("personal", True),
+            ("group", False),
+            ("public", False),
+        ],
+    )
+    def test_hide_toggles_logic_for_all_room_types(
+        self, room_type: str, expected_hide: bool
+    ):
         """Parametrized test: toggles hidden only for personal chats."""
         room = _make_room(room_type)
         hide_toggles = room.room_type == "personal"

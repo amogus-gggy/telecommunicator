@@ -9,6 +9,7 @@ import flet as ft
 @dataclass
 class _FormatAction:
     """Defines a formatting action with its icon, tooltip, and Markdown syntax."""
+
     icon: str
     tooltip: str
     prefix: str
@@ -18,7 +19,7 @@ class _FormatAction:
 
 class FormattingToolbar(ft.Row):
     """A toolbar with buttons for inserting Markdown formatting syntax.
-    
+
     Args:
         get_value: Callable that returns the current input field value
         set_value: Callable that sets the input field value
@@ -27,7 +28,7 @@ class FormattingToolbar(ft.Row):
         disabled: Whether the toolbar buttons should be disabled
         **kwargs: Additional arguments forwarded to ft.Row
     """
-    
+
     def __init__(
         self,
         get_value: Callable[[], str],
@@ -38,14 +39,14 @@ class FormattingToolbar(ft.Row):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        
+
         self._get_value = get_value
         self._set_value = set_value
         self._get_cursor = get_cursor
         self._text_field = text_field
         self._last_selection_start = None
         self._last_selection_end = None
-        
+
         # Track selection changes if text_field is provided
         if self._text_field is not None:
             original_on_selection_change = self._text_field.on_selection_change
@@ -141,7 +142,6 @@ class FormattingToolbar(ft.Row):
             new_value = value[:cursor] + insertion + value[cursor:]
 
         self._set_value(new_value)
-
 
         if self._text_field is not None:
             self._text_field.update()

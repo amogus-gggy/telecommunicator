@@ -8,11 +8,14 @@ from client.crypto.file_crypto import FileEncryptor, FileDecryptor
 
 
 class TestFileCrypto:
-
     def test_encrypt_decrypt_roundtrip(self):
-        sender_ed25519_priv, sender_ed25519_pub = KeyGenerator.generate_identity_keypair()
+        sender_ed25519_priv, sender_ed25519_pub = (
+            KeyGenerator.generate_identity_keypair()
+        )
         sender_x25519_priv, sender_x25519_pub = KeyGenerator.generate_prekey_keypair()
-        recipient_x25519_priv, recipient_x25519_pub = KeyGenerator.generate_prekey_keypair()
+        recipient_x25519_priv, recipient_x25519_pub = (
+            KeyGenerator.generate_prekey_keypair()
+        )
 
         plaintext = b"Hello, this is a secret file content!"
 
@@ -70,7 +73,9 @@ class TestFileCrypto:
         sender_ed25519_priv, _ = KeyGenerator.generate_identity_keypair()
         _, wrong_ed25519_pub = KeyGenerator.generate_identity_keypair()
         sender_x25519_priv, sender_x25519_pub = KeyGenerator.generate_prekey_keypair()
-        recipient_x25519_priv, recipient_x25519_pub = KeyGenerator.generate_prekey_keypair()
+        recipient_x25519_priv, recipient_x25519_pub = (
+            KeyGenerator.generate_prekey_keypair()
+        )
 
         enc = FileEncryptor()
         result = enc.encrypt_file(
@@ -94,7 +99,9 @@ class TestFileCrypto:
             )
 
     def test_wrong_recipient_key_fails(self):
-        sender_ed25519_priv, sender_ed25519_pub = KeyGenerator.generate_identity_keypair()
+        sender_ed25519_priv, sender_ed25519_pub = (
+            KeyGenerator.generate_identity_keypair()
+        )
         sender_x25519_priv, sender_x25519_pub = KeyGenerator.generate_prekey_keypair()
         _, recipient_x25519_pub = KeyGenerator.generate_prekey_keypair()
         wrong_x25519_priv, _ = KeyGenerator.generate_prekey_keypair()
@@ -121,9 +128,13 @@ class TestFileCrypto:
             )
 
     def test_binary_file(self):
-        sender_ed25519_priv, sender_ed25519_pub = KeyGenerator.generate_identity_keypair()
+        sender_ed25519_priv, sender_ed25519_pub = (
+            KeyGenerator.generate_identity_keypair()
+        )
         sender_x25519_priv, sender_x25519_pub = KeyGenerator.generate_prekey_keypair()
-        recipient_x25519_priv, recipient_x25519_pub = KeyGenerator.generate_prekey_keypair()
+        recipient_x25519_priv, recipient_x25519_pub = (
+            KeyGenerator.generate_prekey_keypair()
+        )
 
         plaintext = bytes(range(256)) * 100  # 25.6 KB binary
 

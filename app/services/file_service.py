@@ -35,8 +35,7 @@ async def upload_file(
         # Check membership
         membership = await db.execute(
             select(RoomMember).where(
-                RoomMember.room_id == room_id,
-                RoomMember.user_id == user.id
+                RoomMember.room_id == room_id, RoomMember.user_id == user.id
             )
         )
         if membership.scalar_one_or_none() is None:
@@ -114,16 +113,13 @@ async def upload_file(
 async def list_files(room_id: int, user, db: AsyncSession):
     membership = await db.execute(
         select(RoomMember).where(
-            RoomMember.room_id == room_id,
-            RoomMember.user_id == user.id
+            RoomMember.room_id == room_id, RoomMember.user_id == user.id
         )
     )
     if membership.scalar_one_or_none() is None:
         raise HTTPException(403, "Not a member")
 
-    result = await db.execute(
-        select(File).where(File.room_id == room_id)
-    )
+    result = await db.execute(select(File).where(File.room_id == room_id))
     return result.scalars().all()
 
 
@@ -136,8 +132,7 @@ async def get_file(file_id: int, user, db: AsyncSession) -> File:
 
     membership = await db.execute(
         select(RoomMember).where(
-            RoomMember.room_id == file.room_id,
-            RoomMember.user_id == user.id
+            RoomMember.room_id == file.room_id, RoomMember.user_id == user.id
         )
     )
     if membership.scalar_one_or_none() is None:

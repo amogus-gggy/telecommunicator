@@ -62,11 +62,13 @@ class KeyBackupManager:
         ed_raw = KeyGenerator.serialize_private_key(ed25519_priv)
         x_raw = KeyGenerator.serialize_private_key(x25519_priv)
 
-        plaintext = json.dumps({
-            "ed25519_priv": base64.b64encode(ed_raw).decode(),
-            "x25519_priv": base64.b64encode(x_raw).decode(),
-            "version": 1,
-        }).encode()
+        plaintext = json.dumps(
+            {
+                "ed25519_priv": base64.b64encode(ed_raw).decode(),
+                "x25519_priv": base64.b64encode(x_raw).decode(),
+                "version": 1,
+            }
+        ).encode()
 
         salt = os.urandom(_SALT_SIZE)
         nonce = os.urandom(_NONCE_SIZE)
@@ -88,8 +90,8 @@ class KeyBackupManager:
         Prefer ``decrypt_backup_async`` in async contexts.
         """
         salt = encrypted_blob[:_SALT_SIZE]
-        nonce = encrypted_blob[_SALT_SIZE:_SALT_SIZE + _NONCE_SIZE]
-        ciphertext = encrypted_blob[_SALT_SIZE + _NONCE_SIZE:]
+        nonce = encrypted_blob[_SALT_SIZE : _SALT_SIZE + _NONCE_SIZE]
+        ciphertext = encrypted_blob[_SALT_SIZE + _NONCE_SIZE :]
 
         key = KeyBackupManager._derive_key(password, salt)
         plaintext = AESGCM(key).decrypt(nonce, ciphertext, None)
@@ -118,7 +120,9 @@ class KeyBackupManager:
         Offloads PBKDF2 key derivation to a thread pool so the UI stays
         responsive during the ~600 k iteration hash.
         """
-        fn = partial(KeyBackupManager.encrypt_backup, ed25519_priv, x25519_priv, password)
+        fn = partial(
+            KeyBackupManager.encrypt_backup, ed25519_priv, x25519_priv, password
+        )
         return await asyncio.to_thread(fn)
 
     @staticmethod

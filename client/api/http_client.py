@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 # Exceptions
 # ---------------------------------------------------------------------------
 
+
 class APIError(Exception):
     def __init__(self, message: str, status_code: int) -> None:
         super().__init__(message)
@@ -23,24 +24,28 @@ class APIError(Exception):
 
 class AuthError(APIError):
     """Raised on 401 — session expired or invalid credentials."""
+
     def __init__(self, message: str) -> None:
         super().__init__(message, 401)
 
 
 class ForbiddenError(APIError):
     """Raised on 403."""
+
     def __init__(self, message: str) -> None:
         super().__init__(message, 403)
 
 
 class ConflictError(APIError):
     """Raised on 409."""
+
     def __init__(self, message: str) -> None:
         super().__init__(message, 409)
 
 
 class ValidationError(APIError):
     """Raised on 422."""
+
     def __init__(self, message: str) -> None:
         super().__init__(message, 422)
 
@@ -48,6 +53,7 @@ class ValidationError(APIError):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _parse_detail(response: httpx.Response) -> str:
     """Extract the `detail` field from a JSON error body, falling back to raw text."""
@@ -111,10 +117,13 @@ async def close_shared_clients() -> None:
 # APIClient
 # ---------------------------------------------------------------------------
 
+
 class APIClient:
     """Async wrapper around a shared httpx.AsyncClient for the messenger REST API."""
 
-    def __init__(self, base_url: str | None = None, state: AppState | None = None) -> None:
+    def __init__(
+        self, base_url: str | None = None, state: AppState | None = None
+    ) -> None:
         self.base_url = (base_url or API_URL).rstrip("/")
         self.state = state or AppState()
         self._client = _get_shared_http_client(self.base_url)
@@ -171,19 +180,32 @@ class APIClient:
     # Auth
     # ------------------------------------------------------------------
 
-    async def register(self, username: str, email: str, password: str, identity_pub_ed25519: str, identity_pub_x25519: str, encrypted_backup: str) -> dict:
-        r = await self._post("/auth/register", json={
-            "username": username,
-            "email": email,
-            "password": password,
-            "identity_pub_ed25519": identity_pub_ed25519,
-            "identity_pub_x25519": identity_pub_x25519,
-            "encrypted_backup": encrypted_backup,
-        })
+    async def register(
+        self,
+        username: str,
+        email: str,
+        password: str,
+        identity_pub_ed25519: str,
+        identity_pub_x25519: str,
+        encrypted_backup: str,
+    ) -> dict:
+        r = await self._post(
+            "/auth/register",
+            json={
+                "username": username,
+                "email": email,
+                "password": password,
+                "identity_pub_ed25519": identity_pub_ed25519,
+                "identity_pub_x25519": identity_pub_x25519,
+                "encrypted_backup": encrypted_backup,
+            },
+        )
         return r.json()
 
     async def login(self, username: str, password: str) -> dict:
-        r = await self._post("/auth/login", json={"username": username, "password": password})
+        r = await self._post(
+            "/auth/login", json={"username": username, "password": password}
+        )
         return r.json()
 
     async def logout(self) -> None:
@@ -213,7 +235,10 @@ class APIClient:
         return r.json()
 
     async def change_password(self, current_password: str, new_password: str) -> None:
-        await self._post("/users/me/password", json={"current_password": current_password, "new_password": new_password})
+        await self._post(
+            "/users/me/password",
+            json={"current_password": current_password, "new_password": new_password},
+        )
 
     # ------------------------------------------------------------------
     # Rooms
@@ -223,8 +248,13 @@ class APIClient:
         r = await self._get("/rooms")
         return r.json()
 
-    async def create_room(self, name: str, room_type: str = "public", is_private: bool = False) -> dict:
-        r = await self._post("/rooms", json={"name": name, "room_type": room_type, "is_private": is_private})
+    async def create_room(
+        self, name: str, room_type: str = "public", is_private: bool = False
+    ) -> dict:
+        r = await self._post(
+            "/rooms",
+            json={"name": name, "room_type": room_type, "is_private": is_private},
+        )
         return r.json()
 
     async def create_personal_chat(self, username: str) -> dict:
@@ -243,7 +273,12 @@ class APIClient:
     async def remove_member(self, room_id: int, username: str) -> None:
         await self._delete(f"/rooms/{room_id}/members/{username}")
 
-    async def update_permissions(self, room_id: int, allow_member_invite: bool | None = None, read_only: bool | None = None) -> dict:
+    async def update_permissions(
+        self,
+        room_id: int,
+        allow_member_invite: bool | None = None,
+        read_only: bool | None = None,
+    ) -> dict:
         payload: dict[str, Any] = {}
         if allow_member_invite is not None:
             payload["allow_member_invite"] = allow_member_invite
@@ -256,7 +291,9 @@ class APIClient:
     # Messages
     # ------------------------------------------------------------------
 
-    async def get_messages(self, room_id: int, before_id: int | None = None, limit: int = 50) -> list[dict]:
+    async def get_messages(
+        self, room_id: int, before_id: int | None = None, limit: int = 50
+    ) -> list[dict]:
         params: dict[str, Any] = {"limit": limit}
         if before_id is not None:
             params["before_id"] = before_id
@@ -271,11 +308,16 @@ class APIClient:
         r = await self._get(f"/users/{username}/public-keys")
         return r.json()
 
-    async def update_public_keys(self, ed25519_pub_b64: str, x25519_pub_b64: str) -> dict:
-        r = await self._put("/users/me/public-keys", json={
-            "identity_pub_ed25519": ed25519_pub_b64,
-            "identity_pub_x25519": x25519_pub_b64,
-        })
+    async def update_public_keys(
+        self, ed25519_pub_b64: str, x25519_pub_b64: str
+    ) -> dict:
+        r = await self._put(
+            "/users/me/public-keys",
+            json={
+                "identity_pub_ed25519": ed25519_pub_b64,
+                "identity_pub_x25519": x25519_pub_b64,
+            },
+        )
         return r.json()
 
     async def get_backup(self) -> dict:
@@ -286,7 +328,15 @@ class APIClient:
         r = await self._put("/backup", json={"encrypted_backup": encrypted_backup_b64})
         return r.json()
 
-    async def send_encrypted_message(self, room_id: int, recipient_username: str, encrypted_blob_b64: str, sender_encrypted_blob_b64: str, signature_b64: str, file_ids: list[int] | None = None) -> dict:
+    async def send_encrypted_message(
+        self,
+        room_id: int,
+        recipient_username: str,
+        encrypted_blob_b64: str,
+        sender_encrypted_blob_b64: str,
+        signature_b64: str,
+        file_ids: list[int] | None = None,
+    ) -> dict:
         payload = {
             "room_id": room_id,
             "recipient_username": recipient_username,
@@ -302,13 +352,17 @@ class APIClient:
         try:
             r = await self._post("/messages", json=payload, timeout=timeout)
         except httpx.ReadTimeout:
-            logger.warning("[APIClient] ReadTimeout on POST /messages, retrying with fresh connection")
+            logger.warning(
+                "[APIClient] ReadTimeout on POST /messages, retrying with fresh connection"
+            )
             _shared_clients.pop(self.base_url, None)
             self._client = _get_shared_http_client(self.base_url)
             r = await self._post("/messages", json=payload, timeout=timeout)
         return r.json()
 
-    async def get_encrypted_messages(self, room_id: int | None = None, since: str | None = None) -> list[dict]:
+    async def get_encrypted_messages(
+        self, room_id: int | None = None, since: str | None = None
+    ) -> list[dict]:
         params: dict[str, Any] = {}
         if room_id is not None:
             params["room_id"] = room_id

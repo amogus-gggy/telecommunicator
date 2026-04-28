@@ -19,6 +19,7 @@ class FileResponse(BaseModel):
 
 class EncryptedFileUpload(BaseModel):
     """Metadata sent alongside an encrypted file upload."""
+
     key_blob: str
     key_sender_blob: str
     key_signature: str

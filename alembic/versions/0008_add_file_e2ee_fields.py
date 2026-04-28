@@ -4,6 +4,7 @@ Revision ID: 0008
 Revises: 0007
 Create Date: 2026-04-28
 """
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -14,7 +15,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("room_files", sa.Column("is_encrypted", sa.Boolean(), nullable=False, server_default="false"))
+    op.add_column(
+        "room_files",
+        sa.Column("is_encrypted", sa.Boolean(), nullable=False, server_default="false"),
+    )
     op.add_column("room_files", sa.Column("key_blob", sa.Text(), nullable=True))
     op.add_column("room_files", sa.Column("key_sender_blob", sa.Text(), nullable=True))
     op.add_column("room_files", sa.Column("key_signature", sa.Text(), nullable=True))

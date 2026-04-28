@@ -7,6 +7,7 @@ Usage:
     t("login.submit")          # -> "Войти"
     t("profile.username", username="alice")  # -> "Имя пользователя: alice"
 """
+
 from __future__ import annotations
 
 import os

@@ -8,8 +8,8 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     identity_pub_ed25519: str  # base64-encoded Ed25519 public key
-    identity_pub_x25519: str   # base64-encoded X25519 public key
-    encrypted_backup: str      # base64-encoded encrypted key backup
+    identity_pub_x25519: str  # base64-encoded X25519 public key
+    encrypted_backup: str  # base64-encoded encrypted key backup
 
 
 class RegisterResponse(BaseModel):

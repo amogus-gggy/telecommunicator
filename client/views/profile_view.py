@@ -16,7 +16,10 @@ def profile_view(page: flet.Page, state: AppState) -> None:
     user = state.current_user
 
     display_name_info = flet.Text(
-        t("profile.display_name_label", name=user.display_name or t("profile.display_name_not_set") if user else ""),
+        t(
+            "profile.display_name_label",
+            name=user.display_name or t("profile.display_name_not_set") if user else "",
+        ),
         size=14,
         color="#111b21",
     )
@@ -35,7 +38,9 @@ def profile_view(page: flet.Page, state: AppState) -> None:
         page.update()
         client = APIClient(base_url=API_URL, state=state)
         try:
-            updated = await client.update_profile(display_name=display_name_field.value or "")
+            updated = await client.update_profile(
+                display_name=display_name_field.value or ""
+            )
             new_dn = updated.get("display_name")
             if state.current_user is not None:
                 state.current_user.display_name = new_dn
@@ -45,7 +50,8 @@ def profile_view(page: flet.Page, state: AppState) -> None:
             )
             page.snack_bar = flet.SnackBar(
                 flet.Text(t("profile.display_name_updated"), color="#ffffff"),
-                open=True, bgcolor="#008069",
+                open=True,
+                bgcolor="#008069",
             )
             page.update()
         except ValidationError:
@@ -56,13 +62,17 @@ def profile_view(page: flet.Page, state: AppState) -> None:
             state.token = None
             page.snack_bar = flet.SnackBar(
                 flet.Text(t("profile.session_expired"), color="#ffffff"),
-                open=True, bgcolor="#ea4335",
+                open=True,
+                bgcolor="#ea4335",
             )
             page.update()
             from views.login_view import login_view
+
             login_view(page, state)
         except Exception as exc:
-            page.snack_bar = flet.SnackBar(flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335")
+            page.snack_bar = flet.SnackBar(
+                flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335"
+            )
             page.update()
         finally:
             await client.aclose()
@@ -98,7 +108,8 @@ def profile_view(page: flet.Page, state: AppState) -> None:
             new_password_field.value = ""
             page.snack_bar = flet.SnackBar(
                 flet.Text(t("profile.password_changed"), color="#ffffff"),
-                open=True, bgcolor="#008069",
+                open=True,
+                bgcolor="#008069",
             )
             page.update()
         except AuthError:
@@ -110,19 +121,25 @@ def profile_view(page: flet.Page, state: AppState) -> None:
             password_error.visible = True
             page.update()
         except Exception as exc:
-            page.snack_bar = flet.SnackBar(flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335")
+            page.snack_bar = flet.SnackBar(
+                flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335"
+            )
             page.update()
         finally:
             await client.aclose()
 
     def _go_back(e: flet.ControlEvent) -> None:
         from views.chat_list_view import chat_list_view
+
         chat_list_view(page, state)
 
     # --- Language setting ---
     language_dropdown = flet.Dropdown(
         value=get_locale(),
-        options=[flet.dropdown.Option(key=code, text=name) for code, name in AVAILABLE_LOCALES],
+        options=[
+            flet.dropdown.Option(key=code, text=name)
+            for code, name in AVAILABLE_LOCALES
+        ],
         expand=True,
         bgcolor="#ffffff",
         border_color="#e0e0e0",
@@ -145,7 +162,9 @@ def profile_view(page: flet.Page, state: AppState) -> None:
     ]
     alignment_dropdown = flet.Dropdown(
         value=state.message_alignment,
-        options=[flet.dropdown.Option(key=v, text=label) for label, v in _alignment_options],
+        options=[
+            flet.dropdown.Option(key=v, text=label) for label, v in _alignment_options
+        ],
         expand=True,
         bgcolor="#ffffff",
         border_color="#e0e0e0",
@@ -153,15 +172,19 @@ def profile_view(page: flet.Page, state: AppState) -> None:
 
     def _on_alignment_change(e: flet.ControlEvent) -> None:
         import logging
+
         log = logging.getLogger(__name__)
         new_val = alignment_dropdown.value or "default"
         log.info("[profile_view] Dropdown changed to %r", new_val)
         state.message_alignment = new_val
         if state.secure_storage is not None:
-            state.secure_storage.set("settings.message_alignment", state.message_alignment)
+            state.secure_storage.set(
+                "settings.message_alignment", state.message_alignment
+            )
         page.snack_bar = flet.SnackBar(
             flet.Text(t("profile.setting_saved"), color="#ffffff"),
-            open=True, bgcolor="#008069",
+            open=True,
+            bgcolor="#008069",
         )
         page.update()
 
@@ -169,6 +192,7 @@ def profile_view(page: flet.Page, state: AppState) -> None:
 
     def _save_alignment(e: flet.ControlEvent) -> None:
         import logging
+
         log = logging.getLogger(__name__)
         new_val = alignment_dropdown.value or "default"
         log.info("[profile_view] Save button clicked, value=%r", new_val)
@@ -177,7 +201,8 @@ def profile_view(page: flet.Page, state: AppState) -> None:
             state.secure_storage.set("settings.message_alignment", new_val)
         page.snack_bar = flet.SnackBar(
             flet.Text(t("profile.setting_saved"), color="#ffffff"),
-            open=True, bgcolor="#008069",
+            open=True,
+            bgcolor="#008069",
         )
         page.update()
 
@@ -222,27 +247,48 @@ def profile_view(page: flet.Page, state: AppState) -> None:
                                             flet.Divider(height=8),
                                             flet.Row(
                                                 controls=[
-                                                    flet.Icon(flet.Icons.BADGE, color="#667781"),
+                                                    flet.Icon(
+                                                        flet.Icons.BADGE,
+                                                        color="#667781",
+                                                    ),
                                                     flet.Text(
-                                                        t("profile.username", username=user.username if user else ""),
-                                                        size=14, color="#111b21",
+                                                        t(
+                                                            "profile.username",
+                                                            username=user.username
+                                                            if user
+                                                            else "",
+                                                        ),
+                                                        size=14,
+                                                        color="#111b21",
                                                     ),
                                                 ],
                                                 spacing=12,
                                             ),
                                             flet.Row(
                                                 controls=[
-                                                    flet.Icon(flet.Icons.EMAIL, color="#667781"),
+                                                    flet.Icon(
+                                                        flet.Icons.EMAIL,
+                                                        color="#667781",
+                                                    ),
                                                     flet.Text(
-                                                        t("profile.email", email=user.email if user else ""),
-                                                        size=14, color="#111b21",
+                                                        t(
+                                                            "profile.email",
+                                                            email=user.email
+                                                            if user
+                                                            else "",
+                                                        ),
+                                                        size=14,
+                                                        color="#111b21",
                                                     ),
                                                 ],
                                                 spacing=12,
                                             ),
                                             flet.Row(
                                                 controls=[
-                                                    flet.Icon(flet.Icons.LABEL, color="#667781"),
+                                                    flet.Icon(
+                                                        flet.Icons.LABEL,
+                                                        color="#667781",
+                                                    ),
                                                     display_name_info,
                                                 ],
                                                 spacing=12,
@@ -274,8 +320,12 @@ def profile_view(page: flet.Page, state: AppState) -> None:
                                                 style=flet.ButtonStyle(
                                                     bgcolor="#008069",
                                                     color="#ffffff",
-                                                    shape=flet.RoundedRectangleBorder(radius=8),
-                                                    padding=flet.padding.symmetric(vertical=12, horizontal=24),
+                                                    shape=flet.RoundedRectangleBorder(
+                                                        radius=8
+                                                    ),
+                                                    padding=flet.padding.symmetric(
+                                                        vertical=12, horizontal=24
+                                                    ),
                                                 ),
                                             ),
                                         ],
@@ -306,8 +356,12 @@ def profile_view(page: flet.Page, state: AppState) -> None:
                                                 style=flet.ButtonStyle(
                                                     bgcolor="#008069",
                                                     color="#ffffff",
-                                                    shape=flet.RoundedRectangleBorder(radius=8),
-                                                    padding=flet.padding.symmetric(vertical=12, horizontal=24),
+                                                    shape=flet.RoundedRectangleBorder(
+                                                        radius=8
+                                                    ),
+                                                    padding=flet.padding.symmetric(
+                                                        vertical=12, horizontal=24
+                                                    ),
                                                 ),
                                             ),
                                         ],
@@ -336,8 +390,12 @@ def profile_view(page: flet.Page, state: AppState) -> None:
                                                 style=flet.ButtonStyle(
                                                     bgcolor="#008069",
                                                     color="#ffffff",
-                                                    shape=flet.RoundedRectangleBorder(radius=8),
-                                                    padding=flet.padding.symmetric(vertical=12, horizontal=24),
+                                                    shape=flet.RoundedRectangleBorder(
+                                                        radius=8
+                                                    ),
+                                                    padding=flet.padding.symmetric(
+                                                        vertical=12, horizontal=24
+                                                    ),
                                                 ),
                                             ),
                                         ],
@@ -366,8 +424,12 @@ def profile_view(page: flet.Page, state: AppState) -> None:
                                                 style=flet.ButtonStyle(
                                                     bgcolor="#008069",
                                                     color="#ffffff",
-                                                    shape=flet.RoundedRectangleBorder(radius=8),
-                                                    padding=flet.padding.symmetric(vertical=12, horizontal=24),
+                                                    shape=flet.RoundedRectangleBorder(
+                                                        radius=8
+                                                    ),
+                                                    padding=flet.padding.symmetric(
+                                                        vertical=12, horizontal=24
+                                                    ),
                                                 ),
                                             ),
                                         ],
@@ -396,8 +458,12 @@ def profile_view(page: flet.Page, state: AppState) -> None:
                                                 style=flet.ButtonStyle(
                                                     bgcolor="#ea4335",
                                                     color="#ffffff",
-                                                    shape=flet.RoundedRectangleBorder(radius=8),
-                                                    padding=flet.padding.symmetric(vertical=12, horizontal=24),
+                                                    shape=flet.RoundedRectangleBorder(
+                                                        radius=8
+                                                    ),
+                                                    padding=flet.padding.symmetric(
+                                                        vertical=12, horizontal=24
+                                                    ),
                                                 ),
                                             ),
                                         ],

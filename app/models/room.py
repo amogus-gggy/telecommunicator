@@ -9,8 +9,8 @@ from app.db.base import Base
 
 class RoomType(str, Enum):
     PERSONAL = "personal"  # Личный чат между двумя пользователями
-    GROUP = "group"        # Групповой чат
-    PUBLIC = "public"      # Публичный канал
+    GROUP = "group"  # Групповой чат
+    PUBLIC = "public"  # Публичный канал
 
 
 class Room(Base):

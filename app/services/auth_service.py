@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
 
-SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-fallback-secret-key-change-in-production")
+SECRET_KEY: str = os.getenv(
+    "SECRET_KEY", "dev-fallback-secret-key-change-in-production"
+)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_HOURS", "24"))
 
@@ -35,9 +37,13 @@ async def register_user(
 
     # Validate public key sizes
     if len(identity_pub_ed25519) != 32:
-        raise HTTPException(status_code=400, detail="identity_pub_ed25519 must be exactly 32 bytes")
+        raise HTTPException(
+            status_code=400, detail="identity_pub_ed25519 must be exactly 32 bytes"
+        )
     if len(identity_pub_x25519) != 32:
-        raise HTTPException(status_code=400, detail="identity_pub_x25519 must be exactly 32 bytes")
+        raise HTTPException(
+            status_code=400, detail="identity_pub_x25519 must be exactly 32 bytes"
+        )
 
     result = await db.execute(select(User).where(User.username == username))
     if result.scalar_one_or_none() is not None:
@@ -75,7 +81,9 @@ async def authenticate_user(db: AsyncSession, username: str, password: str) -> U
     return user
 
 
-def create_access_token(user_id: int, username: str, expire_hours: int = ACCESS_TOKEN_EXPIRE_HOURS) -> str:
+def create_access_token(
+    user_id: int, username: str, expire_hours: int = ACCESS_TOKEN_EXPIRE_HOURS
+) -> str:
     """Create a signed JWT access token."""
     expire = datetime.now(timezone.utc) + timedelta(hours=expire_hours)
     payload = {

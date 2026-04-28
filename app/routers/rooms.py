@@ -1,4 +1,11 @@
-from fastapi import APIRouter, Depends, UploadFile, HTTPException, File as FastAPIFile, Form
+from fastapi import (
+    APIRouter,
+    Depends,
+    UploadFile,
+    HTTPException,
+    File as FastAPIFile,
+    Form,
+)
 from fastapi.responses import FileResponse as FastAPIFileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
@@ -6,7 +13,12 @@ from typing import Optional
 from app.auth.deps import get_current_user
 from app.db.deps import get_db
 from app.models.user import User
-from app.schemas.rooms import PermissionUpdate, RoomCreate, RoomResponse, PersonalChatRequest
+from app.schemas.rooms import (
+    PermissionUpdate,
+    RoomCreate,
+    RoomResponse,
+    PersonalChatRequest,
+)
 from app.services import room_service, file_service
 from app.schemas.files import FileResponse
 
@@ -115,7 +127,10 @@ async def upload_file(
     db: AsyncSession = Depends(get_db),
 ):
     return await file_service.upload_file(
-        room_id, user, file, db,
+        room_id,
+        user,
+        file,
+        db,
         key_blob=key_blob,
         key_sender_blob=key_sender_blob,
         key_signature=key_signature,
@@ -135,7 +150,5 @@ async def download_file(
         raise HTTPException(404)
 
     return FastAPIFileResponse(
-        file.path,
-        filename=file.filename,
-        media_type="application/octet-stream"
+        file.path, filename=file.filename, media_type="application/octet-stream"
     )

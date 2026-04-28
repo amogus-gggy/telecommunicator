@@ -5,12 +5,13 @@ Revises: 0003
 Create Date: 2026-04-22 14:00:00.000000
 
 """
+
 from alembic import op
 
 
 # revision identifiers, used by Alembic.
-revision = '0004'
-down_revision = '0003'
+revision = "0004"
+down_revision = "0003"
 branch_labels = None
 depends_on = None
 
