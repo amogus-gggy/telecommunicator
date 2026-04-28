@@ -136,6 +136,7 @@ en:
     encrypted_bad_signature: "⚠️ [Security warning: message signature invalid]"
     encrypted_bad_key: "🔒 [Decryption error: invalid key or tampered message]"
     encrypted_error: "🔒 [Decryption error: %{exc}]"
+    send_error: "Failed to send message: %{exc}"
 
   room_settings:
     title: "Room Settings — %{name}"

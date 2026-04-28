@@ -85,16 +85,16 @@ _shared_clients: dict[str, httpx.AsyncClient] = {}
 
 
 def _get_shared_http_client(base_url: str) -> httpx.AsyncClient:
-    """Return (or create) a shared httpx.AsyncClient for the given base_url.
-
-    Reusing a single client means the underlying TCP connection pool is shared
-    across all APIClient instances, eliminating per-request handshake overhead.
-    """
+    """Return (or create) a shared httpx.AsyncClient for the given base_url."""
     if base_url not in _shared_clients:
         _shared_clients[base_url] = httpx.AsyncClient(
             base_url=base_url,
             timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0),
-            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            limits=httpx.Limits(
+                max_connections=10,
+                max_keepalive_connections=5,
+                keepalive_expiry=10.0,  # drop idle connections after 10s
+            ),
         )
         logger.debug("[APIClient] Created shared HTTP client for %s", base_url)
     return _shared_clients[base_url]
@@ -130,12 +130,25 @@ class APIClient:
         return self._cached_headers
 
     async def _get(self, path: str, **kwargs: Any) -> httpx.Response:
-        response = await self._client.get(path, headers=self._headers(), **kwargs)
+        try:
+            response = await self._client.get(path, headers=self._headers(), **kwargs)
+        except (httpx.RemoteProtocolError, httpx.LocalProtocolError):
+            logger.warning("[APIClient] Stale connection on GET %s, retrying", path)
+            _shared_clients.pop(self.base_url, None)
+            self._client = _get_shared_http_client(self.base_url)
+            response = await self._client.get(path, headers=self._headers(), **kwargs)
         _raise_for_status(response)
         return response
 
     async def _post(self, path: str, **kwargs: Any) -> httpx.Response:
-        response = await self._client.post(path, headers=self._headers(), **kwargs)
+        try:
+            response = await self._client.post(path, headers=self._headers(), **kwargs)
+        except (httpx.RemoteProtocolError, httpx.LocalProtocolError):
+            # Stale keep-alive connection — recreate the pool and retry once
+            logger.warning("[APIClient] Stale connection on POST %s, retrying", path)
+            _shared_clients.pop(self.base_url, None)
+            self._client = _get_shared_http_client(self.base_url)
+            response = await self._client.post(path, headers=self._headers(), **kwargs)
         _raise_for_status(response)
         return response
 
@@ -274,14 +287,25 @@ class APIClient:
         return r.json()
 
     async def send_encrypted_message(self, room_id: int, recipient_username: str, encrypted_blob_b64: str, sender_encrypted_blob_b64: str, signature_b64: str, file_ids: list[int] | None = None) -> dict:
-        r = await self._post("/messages", json={
+        payload = {
             "room_id": room_id,
             "recipient_username": recipient_username,
             "encrypted_blob": encrypted_blob_b64,
             "sender_encrypted_blob": sender_encrypted_blob_b64,
             "signature": signature_b64,
             "file_ids": file_ids or [],
-        })
+        }
+        # Server may need time to deliver via WS to recipient — use a generous timeout.
+        # On ReadTimeout the message may have been saved but the response was lost
+        # (stale keep-alive). Retry once with a fresh connection.
+        timeout = httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0)
+        try:
+            r = await self._post("/messages", json=payload, timeout=timeout)
+        except httpx.ReadTimeout:
+            logger.warning("[APIClient] ReadTimeout on POST /messages, retrying with fresh connection")
+            _shared_clients.pop(self.base_url, None)
+            self._client = _get_shared_http_client(self.base_url)
+            r = await self._post("/messages", json=payload, timeout=timeout)
         return r.json()
 
     async def get_encrypted_messages(self, room_id: int | None = None, since: str | None = None) -> list[dict]:

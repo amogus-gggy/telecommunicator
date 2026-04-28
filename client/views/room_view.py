@@ -1085,10 +1085,20 @@ def room_view(page: flet.Page, state: AppState) -> None:
                         )
                         logging.info("[SEND] Encrypted message sent successfully")
                     except Exception as enc_exc:
-                        logging.error(f"[SEND] Encryption failed: {enc_exc}", exc_info=True)
-                        print(f"[SEND] Encryption failed, falling back to plaintext: {enc_exc}")
-                        # Fall back to plaintext WebSocket
-                        await ws.send_message(room.id, resolved_body, files=uploaded_files)
+                        import logging
+                        logging.error(f"[SEND] Encryption/send failed: {enc_exc}", exc_info=True)
+                        # Remove the optimistic message — it was never delivered
+                        if _state["messages_data"] and _state["messages_data"][-1].get("is_optimistic"):
+                            _state["messages_data"].pop()
+                            if messages_list.controls:
+                                messages_list.controls.pop()
+                        page.snack_bar = flet.SnackBar(
+                            flet.Text(t("room.send_error", exc=enc_exc), color="#ffffff"),
+                            open=True,
+                            bgcolor="#ea4335",
+                        )
+                        page.update()
+                        return
                 else:
                     # Send plaintext via WebSocket (group chat or no keys)
                     print("[SEND] Sending plaintext message via WebSocket")
