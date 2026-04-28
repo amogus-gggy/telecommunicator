@@ -12,6 +12,7 @@ from app.models.file import File
 from app.models.room_member import RoomMember
 
 UPLOAD_DIR = "uploads"
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
 
 
 async def upload_file(
@@ -53,12 +54,20 @@ async def upload_file(
 
         # Save file
         try:
+            total_size = 0
             with open(file_path, "wb") as f:
                 while True:
                     chunk = await file.read(1024 * 1024)  # 1MB
                     if not chunk:
                         break
+                    total_size += len(chunk)
+                    if total_size > MAX_FILE_SIZE:
+                        f.close()
+                        os.remove(file_path)
+                        raise HTTPException(413, "File too large (max 100 MB)")
                     f.write(chunk)
+        except HTTPException:
+            raise
         except Exception:
             print("[UPLOAD ERROR] Failed during file write:")
             traceback.print_exc()

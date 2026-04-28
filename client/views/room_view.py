@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import flet
 
 from api.http_client import APIClient, AuthError
@@ -36,12 +37,25 @@ def room_view(page: flet.Page, state: AppState) -> None:
     attached_files: list[flet.FilePickerFile] = []
     attached_preview = flet.Row(scroll="auto", spacing=6)
 
+    _MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
+
     async def pick_file(e):
         files = await file_picker.pick_files(allow_multiple=True, with_data=True)
-        
+
         if files is not None:
+            oversized = []
             for file in files:
-                attached_files.append(file)
+                size = len(file.bytes) if file.bytes else (os.path.getsize(file.path) if file.path else 0)
+                if size > _MAX_FILE_SIZE:
+                    oversized.append(file.name)
+                else:
+                    attached_files.append(file)
+            if oversized:
+                page.snack_bar = flet.SnackBar(
+                    flet.Text(f"Файл(ы) превышают 100 МБ: {', '.join(oversized)}", color="#ffffff"),
+                    open=True, bgcolor="#ea4335",
+                )
+                page.update()
 
         attached_preview.controls.clear()
 
