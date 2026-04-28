@@ -7,6 +7,7 @@ from api.http_client import APIClient, AuthError
 from api.ws_client import UnifiedWsClient, WsClient
 from config import API_URL
 from localization import t
+from main import logger
 from state import AppState
 from views.widgets.markdown_viewer import MarkdownViewer, resolve_shortcodes
 from views.widgets.formatting_toolbar import FormattingToolbar
