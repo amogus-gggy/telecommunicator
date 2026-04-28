@@ -50,21 +50,20 @@ def login_view(page: flet.Page, state: AppState) -> None:
             )
             state.token = token_data["access_token"]
             
-            # Decrypt backup and recover keys
-            import base64
-            import logging
-            from crypto.key_backup import KeyBackupManager
-            from cryptography.exceptions import InvalidTag
-            
             encrypted_backup_b64 = token_data.get("encrypted_backup")
             if encrypted_backup_b64:
                 try:
-                    logging.info("[Login] Decrypting backup...")
+                    import base64
+                    import logging
+                    from crypto.key_backup import KeyBackupManager
+                    from cryptography.exceptions import InvalidTag
+
+                    logging.info("[Login] Decrypting backup (thread pool)...")
                     encrypted_backup = base64.b64decode(encrypted_backup_b64)
-                    backup_manager = KeyBackupManager()
-                    ed25519_priv, x25519_priv = backup_manager.decrypt_backup(
+                    # PBKDF2 runs in thread pool — UI stays responsive
+                    ed25519_priv, x25519_priv = await KeyBackupManager.decrypt_backup_async(
                         encrypted_backup,
-                        password_field.value or ""
+                        password_field.value or "",
                     )
                     
                     # Store recovered keys in state

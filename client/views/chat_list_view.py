@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import flet
 
 from api.http_client import APIClient
@@ -20,15 +21,31 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
     group_chats: list[dict] = []
     public_rooms: list[dict] = []
 
+    # Cache of built tiles keyed by room id — avoids recreating widgets on every filter
+    _tile_cache: dict[int, flet.Control] = {}
+
     personal_column = flet.Column(scroll=flet.ScrollMode.AUTO, expand=True, spacing=8)
     group_column = flet.Column(scroll=flet.ScrollMode.AUTO, expand=True, spacing=8)
     public_column = flet.Column(scroll=flet.ScrollMode.AUTO, expand=True, spacing=8)
+
+    # Debounce state for search
+    _search_task: asyncio.Task | None = None
+
+    async def _debounced_filter(query: str) -> None:
+        await asyncio.sleep(0.3)
+        _filter_chats(query)
+
+    def _on_search_change(e: flet.ControlEvent) -> None:
+        nonlocal _search_task
+        if _search_task and not _search_task.done():
+            _search_task.cancel()
+        _search_task = page.run_task(_debounced_filter, e.control.value)
 
     search_field = flet.TextField(
         label=t("chat_list.search"),
         prefix_icon=flet.Icons.SEARCH,
         expand=True,
-        on_change=lambda e: _filter_chats(e.control.value),
+        on_change=_on_search_change,
         bgcolor="#ffffff",
         border_color=flet.Colors.TRANSPARENT,
         filled=True,
@@ -198,6 +215,11 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
         return room.get("name", "")
 
     def _build_chat_tile(room: dict) -> flet.Control:
+        room_id: int = room["id"]
+        # Return cached tile if data hasn't changed
+        if room_id in _tile_cache:
+            return _tile_cache[room_id]
+
         display_name = _get_chat_display_name(room)
         name_initial = display_name[0].upper() if display_name else "?"
         room_type = room.get("room_type", "public")
@@ -230,7 +252,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
 
         subtitle = " • ".join(subtitle_parts) if subtitle_parts else t("chat_list.chat")
 
-        return flet.Card(
+        tile = flet.Card(
             content=flet.Container(
                 content=flet.Row(
                     controls=[
@@ -276,6 +298,13 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             bgcolor="#ffffff",
             elevation=1,
         )
+
+        _tile_cache[room_id] = tile
+        return tile
+
+    def _invalidate_tile_cache() -> None:
+        """Clear tile cache when room list is refreshed."""
+        _tile_cache.clear()
 
     def _filter_chats(query: str) -> None:
         q = (query or "").lower()
@@ -328,6 +357,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             group_chats = [r for r in my_chats if r.get("room_type") == "group"]
             public_rooms = await cache_manager.get("public_rooms", fetch_public_rooms)
 
+            _invalidate_tile_cache()
             _filter_chats(search_field.value or "")
 
             total = len(personal_chats) + len(group_chats) + len(public_rooms)
@@ -400,11 +430,13 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             nonlocal personal_chats, group_chats
             personal_chats = [r for r in data if r.get("room_type") == "personal"]
             group_chats = [r for r in data if r.get("room_type") == "group"]
+            _invalidate_tile_cache()
             _filter_chats(search_field.value or "")
 
         def on_public_rooms_update(data):
             nonlocal public_rooms
             public_rooms = data
+            _invalidate_tile_cache()
             _filter_chats(search_field.value or "")
 
         cache_manager.start_background_refresh("my_chats", fetch_my_chats, on_my_chats_update)

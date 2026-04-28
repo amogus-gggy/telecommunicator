@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import flet
 
 from api.http_client import APIClient, ConflictError, ValidationError
 from config import API_URL
 from localization import t
 from state import AppState, UserDTO
+
+
+def _generate_keypairs():
+    """Run in a thread pool — generates both keypairs synchronously."""
+    from crypto.key_generator import KeyGenerator
+    ed25519_priv, ed25519_pub = KeyGenerator.generate_identity_keypair()
+    x25519_priv, x25519_pub = KeyGenerator.generate_prekey_keypair()
+    return ed25519_priv, ed25519_pub, x25519_priv, x25519_pub
 
 
 def register_view(page: flet.Page, state: AppState) -> None:
@@ -57,36 +66,35 @@ def register_view(page: flet.Page, state: AppState) -> None:
 
         client = APIClient(base_url=API_URL, state=state)
         try:
-            # Generate cryptographic keys
-            from crypto.key_generator import KeyGenerator
-            from crypto.key_backup import KeyBackupManager
+            import asyncio
             import base64
             import logging
+            from crypto.key_generator import KeyGenerator
+            from crypto.key_backup import KeyBackupManager
 
-            logging.info("[Registration] Generating identity keypair...")
-            ed25519_priv, ed25519_pub = KeyGenerator.generate_identity_keypair()
-            
-            logging.info("[Registration] Generating prekey keypair...")
-            x25519_priv, x25519_pub = KeyGenerator.generate_prekey_keypair()
-            
+            logging.info("[Registration] Generating keypairs (thread pool)...")
+            # Run blocking key generation off the event loop
+            ed25519_priv, ed25519_pub, x25519_priv, x25519_pub = await asyncio.to_thread(
+                _generate_keypairs
+            )
+
             # Serialize public keys
             ed25519_pub_bytes = KeyGenerator.serialize_public_key(ed25519_pub)
             x25519_pub_bytes = KeyGenerator.serialize_public_key(x25519_pub)
-            
-            # Create encrypted backup
-            logging.info("[Registration] Creating encrypted backup...")
-            backup_manager = KeyBackupManager()
-            encrypted_backup = backup_manager.encrypt_backup(
+
+            # Create encrypted backup — PBKDF2 runs in thread pool
+            logging.info("[Registration] Creating encrypted backup (thread pool)...")
+            encrypted_backup = await KeyBackupManager.encrypt_backup_async(
                 ed25519_priv,
                 x25519_priv,
-                password_field.value or ""
+                password_field.value or "",
             )
-            
+
             # Base64-encode for transmission
-            ed25519_pub_b64 = base64.b64encode(ed25519_pub_bytes).decode('utf-8')
-            x25519_pub_b64 = base64.b64encode(x25519_pub_bytes).decode('utf-8')
-            encrypted_backup_b64 = base64.b64encode(encrypted_backup).decode('utf-8')
-            
+            ed25519_pub_b64 = base64.b64encode(ed25519_pub_bytes).decode("utf-8")
+            x25519_pub_b64 = base64.b64encode(x25519_pub_bytes).decode("utf-8")
+            encrypted_backup_b64 = base64.b64encode(encrypted_backup).decode("utf-8")
+
             logging.info("[Registration] Registering user with server...")
             await client.register(
                 username=username_field.value or "",

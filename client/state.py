@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -8,6 +9,9 @@ if TYPE_CHECKING:
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
     from crypto.key_cache import PublicKeyCache
+
+# Module-level logger — created once, not on every attribute change
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -45,7 +49,7 @@ class AppState:
     # E2EE cryptographic keys
     ed25519_private: "Ed25519PrivateKey | None" = field(default=None, repr=False)
     x25519_private: "X25519PrivateKey | None" = field(default=None, repr=False)
-    old_x25519_private: "X25519PrivateKey | None" = field(default=None, repr=False)  # For key rotation grace period
+    old_x25519_private: "X25519PrivateKey | None" = field(default=None, repr=False)
     public_key_cache: "PublicKeyCache | None" = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
@@ -57,16 +61,21 @@ class AppState:
                 pass  # Will be initialized later when crypto module is available
 
     def __setattr__(self, name: str, value: object) -> None:
-        object.__setattr__(self, name, value)
         if name == "message_alignment":
-            import logging
-            logging.getLogger(__name__).info(
-                "[AppState] message_alignment set to %r, on_alignment_change=%s",
-                value,
-                "set" if self.on_alignment_change is not None else "None",
-            )
-            if self.on_alignment_change is not None:
-                self.on_alignment_change(str(value))
+            # Only fire callback when the value actually changes
+            old = self.__dict__.get("message_alignment")
+            object.__setattr__(self, name, value)
+            if old != value:
+                _logger.info(
+                    "[AppState] message_alignment changed %r -> %r, callback=%s",
+                    old,
+                    value,
+                    "set" if self.on_alignment_change is not None else "None",
+                )
+                if self.on_alignment_change is not None:
+                    self.on_alignment_change(str(value))
+        else:
+            object.__setattr__(self, name, value)
 
     def close_room_ws(self) -> None:
         if self.room_ws is not None:
