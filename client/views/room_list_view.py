@@ -211,8 +211,6 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
                 break
             await _load_rooms()
 
-    _notif_client: dict = {"client": None}
-
     def _on_notification(payload: dict) -> None:
         if payload.get("type") == "invite":
             room_name = payload.get("payload", {}).get("name", "")
@@ -233,9 +231,8 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
 
     def _stop_refresh() -> None:
         _active["running"] = False
-        nc = _notif_client.get("client")
-        if nc is not None:
-            nc.close()
+        if state.ws is not None:
+            state.ws._on_notification = None
 
     def _go_profile(e: flet.ControlEvent) -> None:
         _stop_refresh()
