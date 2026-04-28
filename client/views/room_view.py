@@ -1,19 +1,42 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 import flet
 
 from api.http_client import APIClient, AuthError
-from api.ws_client import UnifiedWsClient, WsClient
+from api.ws_client import UnifiedWsClient
 from config import API_URL
 from localization import t
-from main import logger
 from state import AppState
 from views.widgets.markdown_viewer import MarkdownViewer, resolve_shortcodes
 from views.widgets.formatting_toolbar import FormattingToolbar
 from views.widgets.emoji_picker import EmojiPicker
 
 import httpx
+
+logger = logging.getLogger(__name__)
+
+
+def _decrypt_file_to_path(
+    decryptor,
+    src_path: str,
+    dst_path: str,
+    *,
+    own: bool,
+    key_sender_blob_b64: str | None = None,
+    key_blob_b64: str | None = None,
+    signature_b64: str | None = None,
+    x25519_priv=None,
+    sender_ed25519_pub=None,
+) -> None:
+    """Synchronous helper — runs in thread pool via asyncio.to_thread."""
+    with open(src_path, "rb") as src, open(dst_path, "wb") as dst:
+        if own:
+            decryptor.decrypt_own_file_streaming(src, dst, key_sender_blob_b64, x25519_priv)
+        else:
+            decryptor.decrypt_file_streaming(src, dst, key_blob_b64, signature_b64, x25519_priv, sender_ed25519_pub)
 
 
 def room_view(page: flet.Page, state: AppState) -> None:
@@ -34,26 +57,30 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
     file_picker: flet.FilePicker = flet.FilePicker()
 
-    attached_files: list[flet.FilePickerFile] = []
+    # Paths of files selected via FilePicker (no in-memory bytes)
+    attached_file_paths: list[tuple[str, str]] = []  # (path, display_name)
     attached_preview = flet.Row(scroll="auto", spacing=6)
 
     _MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
 
     async def pick_file(e):
-        files = await file_picker.pick_files(allow_multiple=True, with_data=True)
+        # pick_files without with_data=True — we only need paths
+        files = await file_picker.pick_files(allow_multiple=True, with_data=False)
 
         if files is not None:
             oversized = []
-            for file in files:
-                size = (
-                    len(file.bytes)
-                    if file.bytes
-                    else (os.path.getsize(file.path) if file.path else 0)
-                )
+            for f in files:
+                path = f.path
+                if not path:
+                    continue
+                try:
+                    size = os.path.getsize(path)
+                except OSError:
+                    size = 0
                 if size > _MAX_FILE_SIZE:
-                    oversized.append(file.name)
+                    oversized.append(f.name)
                 else:
-                    attached_files.append(file)
+                    attached_file_paths.append((path, f.name))
             if oversized:
                 page.snack_bar = flet.SnackBar(
                     flet.Text(
@@ -65,16 +92,19 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 )
                 page.update()
 
-        attached_preview.controls.clear()
+        _rebuild_attached_preview()
+        page.update()
 
-        for i, f in enumerate(attached_files):
+    def _rebuild_attached_preview() -> None:
+        attached_preview.controls.clear()
+        for i, (path, name) in enumerate(attached_file_paths):
             idx = i
             attached_preview.controls.append(
                 flet.Row(
                     spacing=4,
                     controls=[
                         flet.Icon(flet.Icons.ATTACH_FILE, size=14, color="#008069"),
-                        flet.Text(f.name, size=12),
+                        flet.Text(name, size=12),
                         flet.IconButton(
                             icon=flet.Icons.CLOSE,
                             icon_size=14,
@@ -84,27 +114,10 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 )
             )
 
-        page.update()
-
     def _remove_attached_file(idx: int) -> None:
-        if 0 <= idx < len(attached_files):
-            attached_files.pop(idx)
-        attached_preview.controls.clear()
-        for i, f in enumerate(attached_files):
-            attached_preview.controls.append(
-                flet.Row(
-                    spacing=4,
-                    controls=[
-                        flet.Icon(flet.Icons.ATTACH_FILE, size=14, color="#008069"),
-                        flet.Text(f.name, size=12),
-                        flet.IconButton(
-                            icon=flet.Icons.CLOSE,
-                            icon_size=14,
-                            on_click=lambda e, i=i: _remove_attached_file(i),
-                        ),
-                    ],
-                )
-            )
+        if 0 <= idx < len(attached_file_paths):
+            attached_file_paths.pop(idx)
+        _rebuild_attached_preview()
         page.update()
 
     message_input = flet.TextField(
@@ -154,6 +167,47 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
     page.overlay.append(_profile_sheet)
     print("[room_view] profile_sheet ok")
+
+    # --- File progress overlay ---
+    _progress_label = flet.Text("", size=12, color="#ffffff", weight=flet.FontWeight.W_500)
+    _progress_bar = flet.ProgressBar(value=0, bgcolor="#ffffff30", color="#ffffff", width=260)
+    _progress_pct = flet.Text("0%", size=11, color="#ffffffcc")
+    _progress_overlay = flet.Container(
+        content=flet.Column(
+            controls=[
+                _progress_label,
+                flet.Row(controls=[_progress_bar, _progress_pct], spacing=8, vertical_alignment=flet.CrossAxisAlignment.CENTER),
+            ],
+            spacing=4,
+            tight=True,
+        ),
+        bgcolor="#008069",
+        padding=flet.padding.symmetric(horizontal=16, vertical=10),
+        border_radius=flet.border_radius.only(top_left=8, top_right=8),
+        visible=False,
+        shadow=flet.BoxShadow(blur_radius=8, color="#00000040"),
+    )
+
+    def _show_progress(label: str) -> None:
+        _progress_label.value = label
+        _progress_bar.value = 0
+        _progress_pct.value = "0%"
+        _progress_overlay.visible = True
+        page.update()
+
+    def _update_progress(done: int, total: int) -> None:
+        if total > 0:
+            pct = done / total
+            _progress_bar.value = pct
+            _progress_pct.value = f"{int(pct * 100)}%"
+        else:
+            _progress_bar.value = None  # indeterminate
+            _progress_pct.value = "…"
+        page.update()
+
+    def _hide_progress() -> None:
+        _progress_overlay.visible = False
+        page.update()
 
     # Emoji picker callbacks
     def _on_emoji_selected(emoji_char: str) -> None:
@@ -301,118 +355,114 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 file_item.setdefault("uploader_username", msg.get("author_username"))
 
             async def local_download_task(fid: int, fname: str, file_meta: dict):
+                import base64
+                import tempfile
+                from crypto.file_crypto import FileDecryptor
+                from crypto.key_generator import KeyGenerator
+
                 client = APIClient(base_url=API_URL, state=state)
                 try:
                     url = f"{API_URL}/rooms/{room.id}/files/{fid}/download"
+                    is_encrypted = file_meta.get("is_encrypted")
+                    is_own = (
+                        state.current_user is not None
+                        and file_meta.get("uploader_id") == state.current_user.id
+                    )
 
-                    # Fetch file bytes first
-                    async with httpx.AsyncClient() as http:
-                        r = await http.get(url, headers=client._headers())
-                        r.raise_for_status()
-                        file_bytes = r.content
+                    # Resolve sender keys before download
+                    sender_keys = None
+                    if is_encrypted and not is_own:
+                        sender_username = file_meta.get("uploader_username") or file_meta.get("author_username")
+                        if sender_username and state.public_key_cache:
+                            sender_keys = state.public_key_cache.get_public_keys(sender_username)
+                        if not sender_keys and sender_username:
+                            kd = await client.get_public_keys(sender_username)
+                            ed_pub = KeyGenerator.load_ed25519_public_key(base64.b64decode(kd["identity_pub_ed25519"]))
+                            x_pub = KeyGenerator.load_x25519_public_key(base64.b64decode(kd["identity_pub_x25519"]))
+                            sender_keys = {"ed25519_pub": ed_pub, "x25519_pub": x_pub}
+                            if state.public_key_cache:
+                                state.public_key_cache.set_public_keys(sender_username, ed_pub, x_pub)
 
-                    # Decrypt if encrypted
-                    if file_meta.get("is_encrypted"):
-                        try:
-                            import base64
-                            import logging
-                            from crypto.file_crypto import FileDecryptor
-                            from crypto.key_generator import KeyGenerator
-
-                            decryptor = FileDecryptor()
-                            is_own = (
-                                state.current_user is not None
-                                and file_meta.get("uploader_id")
-                                == state.current_user.id
-                            )
-
-                            if is_own and file_meta.get("key_sender_blob"):
-                                file_bytes = decryptor.decrypt_own_file(
-                                    ciphertext=file_bytes,
-                                    key_sender_blob_b64=file_meta["key_sender_blob"],
-                                    x25519_priv=state.x25519_private,
-                                )
-                            elif file_meta.get("key_blob") and file_meta.get(
-                                "key_signature"
-                            ):
-                                # Need sender public key
-                                sender_keys = None
-                                sender_username = file_meta.get(
-                                    "uploader_username"
-                                ) or file_meta.get("author_username")
-                                if sender_username and state.public_key_cache:
-                                    sender_keys = (
-                                        state.public_key_cache.get_public_keys(
-                                            sender_username
-                                        )
-                                    )
-                                if not sender_keys and sender_username:
-                                    _kc = APIClient(base_url=API_URL, state=state)
-                                    try:
-                                        kd = await _kc.get_public_keys(sender_username)
-                                        ed_pub = KeyGenerator.load_ed25519_public_key(
-                                            base64.b64decode(kd["identity_pub_ed25519"])
-                                        )
-                                        x_pub = KeyGenerator.load_x25519_public_key(
-                                            base64.b64decode(kd["identity_pub_x25519"])
-                                        )
-                                        sender_keys = {
-                                            "ed25519_pub": ed_pub,
-                                            "x25519_pub": x_pub,
-                                        }
-                                        if state.public_key_cache:
-                                            state.public_key_cache.set_public_keys(
-                                                sender_username, ed_pub, x_pub
-                                            )
-                                    finally:
-                                        await _kc.aclose()
-
-                                if sender_keys:
-                                    file_bytes = decryptor.decrypt_file(
-                                        ciphertext=file_bytes,
-                                        key_blob_b64=file_meta["key_blob"],
-                                        signature_b64=file_meta["key_signature"],
-                                        x25519_priv=state.x25519_private,
-                                        sender_ed25519_pub=sender_keys["ed25519_pub"],
-                                    )
-                        except Exception as dec_exc:
-                            import logging
-
-                            logging.error(
-                                f"[FILE] Decryption failed: {dec_exc}", exc_info=True
-                            )
-                            page.snack_bar = flet.SnackBar(
-                                flet.Text(
-                                    f"Decryption failed: {dec_exc}", color="#fff"
-                                ),
-                                open=True,
-                                bgcolor="#ea4335",
-                            )
-                            page.update()
-                            return
-
-                    # save_file on Android/iOS/web requires src_bytes
+                    # Ask user where to save first
                     save_path = await file_picker.save_file(
                         file_name=fname,
                         file_type=flet.FilePickerFileType.ANY,
-                        src_bytes=file_bytes,
                     )
+                    if not save_path:
+                        return  # user cancelled
 
-                    # On desktop save_path is returned and we write the file ourselves
-                    if save_path:
-                        with open(save_path, "wb") as f_save:
-                            f_save.write(file_bytes)
+                    download_timeout = httpx.Timeout(connect=5.0, read=300.0, write=10.0, pool=5.0)
+
+                    if is_encrypted:
+                        # Stream → temp file → decrypt → save_path
+                        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".enc.tmp")
+                        os.close(tmp_fd)
+                        try:
+                            _show_progress(f"⬇ {fname}")
+                            async with httpx.AsyncClient(timeout=download_timeout) as http:
+                                async with http.stream("GET", url, headers=client._headers()) as r:
+                                    r.raise_for_status()
+                                    total = int(r.headers.get("content-length", 0))
+                                    done = 0
+                                    with open(tmp_path, "wb") as tmp_f:
+                                        async for chunk in r.aiter_bytes(256 * 1024):
+                                            tmp_f.write(chunk)
+                                            done += len(chunk)
+                                            _update_progress(done, total)
+
+                            _progress_label.value = f"🔓 {fname}"
+                            _progress_bar.value = None  # indeterminate during decrypt
+                            _progress_pct.value = "…"
+                            page.update()
+
+                            decryptor = FileDecryptor()
+                            if is_own and file_meta.get("key_sender_blob"):
+                                await asyncio.to_thread(
+                                    _decrypt_file_to_path, decryptor, tmp_path, save_path,
+                                    key_sender_blob_b64=file_meta["key_sender_blob"],
+                                    x25519_priv=state.x25519_private,
+                                    own=True,
+                                )
+                            elif sender_keys and file_meta.get("key_blob") and file_meta.get("key_signature"):
+                                await asyncio.to_thread(
+                                    _decrypt_file_to_path, decryptor, tmp_path, save_path,
+                                    key_blob_b64=file_meta["key_blob"],
+                                    signature_b64=file_meta["key_signature"],
+                                    x25519_priv=state.x25519_private,
+                                    sender_ed25519_pub=sender_keys["ed25519_pub"],
+                                    own=False,
+                                )
+                            else:
+                                raise ValueError("Missing decryption keys")
+                        finally:
+                            _hide_progress()
+                            if os.path.exists(tmp_path):
+                                os.unlink(tmp_path)
+                    else:
+                        _show_progress(f"⬇ {fname}")
+                        try:
+                            async with httpx.AsyncClient(timeout=download_timeout) as http:
+                                async with http.stream("GET", url, headers=client._headers()) as r:
+                                    r.raise_for_status()
+                                    total = int(r.headers.get("content-length", 0))
+                                    done = 0
+                                    with open(save_path, "wb") as out_f:
+                                        async for chunk in r.aiter_bytes(256 * 1024):
+                                            out_f.write(chunk)
+                                            done += len(chunk)
+                                            _update_progress(done, total)
+                        finally:
+                            _hide_progress()
 
                     page.snack_bar = flet.SnackBar(
-                        flet.Text(f"Downloaded {fname}", color="#fff"),
-                        open=True,
-                        bgcolor="#008069",
+                        flet.Text(f"Скачано: {fname}", color="#fff"),
+                        open=True, bgcolor="#008069",
                     )
                 except Exception as e:
+                    logging.error(f"[DOWNLOAD] Failed: {e}", exc_info=True)
                     page.snack_bar = flet.SnackBar(
                         flet.Text(str(e), color="#fff"),
-                        open=True,
-                        bgcolor="#ea4335",
+                        open=True, bgcolor="#ea4335",
                     )
                 finally:
                     await client.aclose()
@@ -971,11 +1021,11 @@ def room_view(page: flet.Page, state: AppState) -> None:
     async def _send_message() -> None:
         body = (message_input.value or "").strip()
 
-        if not body and attached_files:
+        if not body and attached_file_paths:
             body = "📎"
 
         print(f"[SEND] Attempting to send message: '{body}'")
-        if not body and not attached_files:
+        if not body and not attached_file_paths:
             print("[SEND] Empty message, aborting")
             return
         ws: WsClient | None = _state.get("ws_client")
@@ -1028,110 +1078,114 @@ def room_view(page: flet.Page, state: AppState) -> None:
             client = APIClient(base_url=API_URL, state=state)
 
             try:
-                # Upload files first
+                # Upload files first (streaming — no full file in memory)
                 uploaded_files = []
                 is_personal = room.room_type == "personal"
 
-                for f in attached_files:
-                    # On Android f.path is None — use f.bytes instead
-                    if f.path:
-                        with open(f.path, "rb") as fh:
-                            file_bytes = fh.read()
-                    elif f.bytes:
-                        file_bytes = f.bytes
-                    else:
-                        continue
+                # Resolve E2EE recipient keys once for all files
+                e2ee_recipient_keys = None
+                e2ee_recipient_username = None
+                if is_personal and state.ed25519_private and state.x25519_private and state.current_user:
+                    parts = room.name.split(", ")
+                    e2ee_recipient_username = next(
+                        (p for p in parts if p != state.current_user.username), None
+                    )
+                    if e2ee_recipient_username:
+                        if state.public_key_cache:
+                            e2ee_recipient_keys = state.public_key_cache.get_public_keys(e2ee_recipient_username)
+                        if not e2ee_recipient_keys:
+                            import base64
+                            from crypto.key_generator import KeyGenerator
+                            kd = await client.get_public_keys(e2ee_recipient_username)
+                            r_x25519_pub = KeyGenerator.load_x25519_public_key(base64.b64decode(kd["identity_pub_x25519"]))
+                            r_ed25519_pub = KeyGenerator.load_ed25519_public_key(base64.b64decode(kd["identity_pub_ed25519"]))
+                            e2ee_recipient_keys = {"x25519_pub": r_x25519_pub, "ed25519_pub": r_ed25519_pub, "user_id": kd.get("user_id", "")}
+                            if state.public_key_cache:
+                                state.public_key_cache.set_public_keys(e2ee_recipient_username, r_ed25519_pub, r_x25519_pub, str(kd.get("user_id", "")))
 
-                    # Encrypt file for personal E2EE chats
+                for file_path, file_name in attached_file_paths:
+                    import base64
+                    import tempfile
+                    from crypto.file_crypto import FileEncryptor
                     key_blob = None
                     key_sender_blob = None
                     key_signature = None
 
-                    if is_personal and state.ed25519_private and state.x25519_private:
-                        parts = room.name.split(", ")
-                        _recipient = next(
-                            (p for p in parts if p != state.current_user.username), None
-                        )
-                        if _recipient:
-                            try:
-                                import base64
-                                from crypto.file_crypto import FileEncryptor
-                                from crypto.key_generator import KeyGenerator
+                    if e2ee_recipient_keys and state.ed25519_private and state.x25519_private and state.current_user:
+                        # Stream-encrypt into a temp file — never loads full file into memory
+                        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".enc")
+                        tmp_path = tmp.name
+                        tmp.close()
+                        try:
+                            enc = FileEncryptor()
 
-                                r_keys = None
-                                if state.public_key_cache:
-                                    r_keys = state.public_key_cache.get_public_keys(
-                                        _recipient
+                            def _do_encrypt():
+                                with open(tmp_path, "wb") as dst_f:
+                                    return enc.encrypt_file_streaming(
+                                        file_path, dst_f, file_name,
+                                        e2ee_recipient_keys["x25519_pub"],
+                                        state.ed25519_private,
+                                        state.x25519_private.public_key(),
+                                        str(state.current_user.id),
+                                        str(e2ee_recipient_keys.get("user_id", "")),
                                     )
-                                if not r_keys:
-                                    _kc = APIClient(base_url=API_URL, state=state)
-                                    try:
-                                        kd = await _kc.get_public_keys(_recipient)
-                                        r_x25519_pub = (
-                                            KeyGenerator.load_x25519_public_key(
-                                                base64.b64decode(
-                                                    kd["identity_pub_x25519"]
-                                                )
-                                            )
-                                        )
-                                        r_ed25519_pub = (
-                                            KeyGenerator.load_ed25519_public_key(
-                                                base64.b64decode(
-                                                    kd["identity_pub_ed25519"]
-                                                )
-                                            )
-                                        )
-                                        r_keys = {
-                                            "x25519_pub": r_x25519_pub,
-                                            "ed25519_pub": r_ed25519_pub,
-                                            "user_id": kd.get("user_id", ""),
-                                        }
-                                        if state.public_key_cache:
-                                            state.public_key_cache.set_public_keys(
-                                                _recipient,
-                                                r_ed25519_pub,
-                                                r_x25519_pub,
-                                                str(kd.get("user_id", "")),
-                                            )
-                                    finally:
-                                        await _kc.aclose()
 
-                                enc = FileEncryptor()
-                                result = enc.encrypt_file(
-                                    plaintext=file_bytes,
-                                    filename=f.name,
-                                    recipient_x25519_pub=r_keys["x25519_pub"],
-                                    sender_ed25519_priv=state.ed25519_private,
-                                    sender_x25519_pub=state.x25519_private.public_key(),
-                                    sender_id=str(state.current_user.id),
-                                    recipient_id=str(r_keys.get("user_id", "")),
-                                )
-                                file_bytes = result["ciphertext"]
-                                key_blob = result["key_blob"]
-                                key_sender_blob = result["key_sender_blob"]
-                                key_signature = result["signature"]
-                            except Exception as enc_exc:
-                                import logging
+                            meta = await asyncio.to_thread(_do_encrypt)
+                            key_blob = meta["key_blob"]
+                            key_sender_blob = meta["key_sender_blob"]
+                            key_signature = meta["signature"]
+                            upload_path = tmp_path
+                        except Exception as enc_exc:
+                            logging.error(f"[FILE] Encryption failed: {enc_exc}", exc_info=True)
+                            upload_path = file_path  # fall back to plaintext
+                            tmp_path = None
+                    else:
+                        upload_path = file_path
+                        tmp_path = None
 
-                                logging.error(
-                                    f"[FILE] Encryption failed: {enc_exc}",
-                                    exc_info=True,
-                                )
+                    try:
+                        # Stream upload with progress via _TrackingFile wrapper
+                        upload_timeout = httpx.Timeout(connect=5.0, read=300.0, write=300.0, pool=5.0)
+                        file_size = os.path.getsize(upload_path)
+                        _show_progress(f"⬆ {file_name}")
 
-                    async with httpx.AsyncClient() as http:
-                        data = {}
+                        # Raw body upload — no multipart, no Starlette buffering
+                        upload_headers = {
+                            **client._headers(),
+                            "X-Filename": file_name,
+                            "Content-Type": "application/octet-stream",
+                            "Content-Length": str(file_size),
+                        }
                         if key_blob:
-                            data["key_blob"] = key_blob
-                            data["key_sender_blob"] = key_sender_blob
-                            data["key_signature"] = key_signature
-                        response = await http.post(
-                            f"{API_URL}/rooms/{room.id}/files",
-                            headers=client._headers(),
-                            files={"file": (f.name, file_bytes)},
-                            data=data or None,
-                        )
+                            upload_headers["X-Key-Blob"] = key_blob
+                            upload_headers["X-Key-Sender-Blob"] = key_sender_blob
+                            upload_headers["X-Key-Signature"] = key_signature
+
+                        done_bytes = 0
+
+                        async def _body_chunks():
+                            nonlocal done_bytes
+                            with open(upload_path, "rb") as fh:
+                                while True:
+                                    chunk = fh.read(256 * 1024)
+                                    if not chunk:
+                                        break
+                                    done_bytes += len(chunk)
+                                    _update_progress(done_bytes, file_size)
+                                    yield chunk
+
+                        async with httpx.AsyncClient(timeout=upload_timeout) as http:
+                            response = await http.post(
+                                f"{API_URL}/rooms/{room.id}/files",
+                                headers=upload_headers,
+                                content=_body_chunks(),
+                            )
                         response.raise_for_status()
                         uploaded_files.append(response.json())
+                    finally:
+                        _hide_progress()
+                        if tmp_path and os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
 
                 # Check if this is a personal chat and we should encrypt
                 should_encrypt = False
@@ -1256,17 +1310,18 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     print("[SEND] Sending plaintext message via WebSocket")
                     await ws.send_message(room.id, resolved_body, files=uploaded_files)
 
-                # re-render
-                if attached_files:
+                # re-render optimistic tile with real file info
+                if attached_file_paths and uploaded_files:
                     _state["messages_data"][-1]["files"] = uploaded_files
-
                     messages_list.controls[-1] = _build_message_tile(
                         _state["messages_data"][-1]
                     )
                     page.update()
 
                 # Clear attached files after sending
-                attached_files.clear()
+                attached_file_paths.clear()
+                _rebuild_attached_preview()
+                page.update()
 
             finally:
                 await client.aclose()
@@ -1527,6 +1582,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     expand=True,
                     padding=flet.padding.symmetric(horizontal=8, vertical=8),
                 ),
+                _progress_overlay,
                 flet.Container(
                     content=flet.Column(
                         controls=[

@@ -1,10 +1,8 @@
 from fastapi import (
     APIRouter,
     Depends,
-    UploadFile,
     HTTPException,
-    File as FastAPIFile,
-    Form,
+    Request,
 )
 from fastapi.responses import FileResponse as FastAPIFileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -119,21 +117,31 @@ async def list_files(
 @router.post("/{room_id}/files", response_model=FileResponse)
 async def upload_file(
     room_id: int,
-    file: UploadFile = FastAPIFile(...),
-    key_blob: Optional[str] = Form(None),
-    key_sender_blob: Optional[str] = Form(None),
-    key_signature: Optional[str] = Form(None),
+    request: Request,
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await file_service.upload_file(
-        room_id,
-        user,
-        file,
-        db,
-        key_blob=key_blob,
-        key_sender_blob=key_sender_blob,
-        key_signature=key_signature,
+    """Stream-upload a file without multipart buffering.
+
+    Metadata via headers:
+      X-Filename        — original filename (required)
+      X-Key-Blob        — base64 E2EE recipient key blob (optional)
+      X-Key-Sender-Blob — base64 E2EE sender key blob (optional)
+      X-Key-Signature   — base64 Ed25519 signature (optional)
+    """
+    filename = request.headers.get("X-Filename", "").strip()
+    if not filename:
+        raise HTTPException(400, "X-Filename header is required")
+
+    return await file_service.upload_file_stream(
+        room_id=room_id,
+        user=user,
+        filename=filename,
+        stream=request.stream(),
+        db=db,
+        key_blob=request.headers.get("X-Key-Blob") or None,
+        key_sender_blob=request.headers.get("X-Key-Sender-Blob") or None,
+        key_signature=request.headers.get("X-Key-Signature") or None,
     )
 
 
