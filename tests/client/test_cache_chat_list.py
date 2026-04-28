@@ -1,8 +1,9 @@
 """Integration tests for cache manager with chat list data loading."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -10,16 +11,40 @@ from client.cache.cache_manager import CacheEntry, CacheManager
 
 
 PERSONAL_ROOMS = [
-    {"id": 1, "name": "alice, bob", "room_type": "personal", "owner_username": "alice",
-     "member_count": 2, "is_private": False, "allow_member_invite": False, "read_only": False},
+    {
+        "id": 1,
+        "name": "alice, bob",
+        "room_type": "personal",
+        "owner_username": "alice",
+        "member_count": 2,
+        "is_private": False,
+        "allow_member_invite": False,
+        "read_only": False,
+    },
 ]
 GROUP_ROOMS = [
-    {"id": 2, "name": "dev-team", "room_type": "group", "owner_username": "alice",
-     "member_count": 5, "is_private": False, "allow_member_invite": True, "read_only": False},
+    {
+        "id": 2,
+        "name": "dev-team",
+        "room_type": "group",
+        "owner_username": "alice",
+        "member_count": 5,
+        "is_private": False,
+        "allow_member_invite": True,
+        "read_only": False,
+    },
 ]
 PUBLIC_ROOMS = [
-    {"id": 3, "name": "general", "room_type": "public", "owner_username": "admin",
-     "member_count": 20, "is_private": False, "allow_member_invite": True, "read_only": False},
+    {
+        "id": 3,
+        "name": "general",
+        "room_type": "public",
+        "owner_username": "admin",
+        "member_count": 20,
+        "is_private": False,
+        "allow_member_invite": True,
+        "read_only": False,
+    },
 ]
 MY_CHATS = PERSONAL_ROOMS + GROUP_ROOMS
 
@@ -65,8 +90,16 @@ class TestCacheChatListIntegration:
         """Test that on_update callback is called after background refresh completes."""
         manager = CacheManager(refresh_interval=1, max_age=300)
         updated_chats = MY_CHATS + [
-            {"id": 4, "name": "new-room", "room_type": "group", "owner_username": "bob",
-             "member_count": 2, "is_private": False, "allow_member_invite": True, "read_only": False}
+            {
+                "id": 4,
+                "name": "new-room",
+                "room_type": "group",
+                "owner_username": "bob",
+                "member_count": 2,
+                "is_private": False,
+                "allow_member_invite": True,
+                "read_only": False,
+            }
         ]
         fetch_fn = AsyncMock(return_value=updated_chats)
         on_update = MagicMock()
@@ -74,6 +107,7 @@ class TestCacheChatListIntegration:
         manager.start_background_refresh("my_chats", fetch_fn, on_update)
 
         import asyncio
+
         await asyncio.sleep(1.5)
         manager.stop_background_refresh()
 

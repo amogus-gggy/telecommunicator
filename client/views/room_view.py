@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+import os
 import flet
 
 from api.http_client import APIClient, AuthError
-from api.ws_client import WsClient
+from api.ws_client import UnifiedWsClient
 from config import API_URL
 from localization import t
 from state import AppState
@@ -11,18 +14,40 @@ from views.widgets.markdown_viewer import MarkdownViewer, resolve_shortcodes
 from views.widgets.formatting_toolbar import FormattingToolbar
 from views.widgets.emoji_picker import EmojiPicker
 
-import httpx 
+import httpx
+
+logger = logging.getLogger(__name__)
+
+
+def _decrypt_file_to_path(
+    decryptor,
+    src_path: str,
+    dst_path: str,
+    *,
+    own: bool,
+    key_sender_blob_b64: str | None = None,
+    key_blob_b64: str | None = None,
+    signature_b64: str | None = None,
+    x25519_priv=None,
+    sender_ed25519_pub=None,
+) -> None:
+    """Synchronous helper — runs in thread pool via asyncio.to_thread."""
+    with open(src_path, "rb") as src, open(dst_path, "wb") as dst:
+        if own:
+            decryptor.decrypt_own_file_streaming(src, dst, key_sender_blob_b64, x25519_priv)
+        else:
+            decryptor.decrypt_file_streaming(src, dst, key_blob_b64, signature_b64, x25519_priv, sender_ed25519_pub)
 
 
 def room_view(page: flet.Page, state: AppState) -> None:
     room = state.active_room
     print(f"[room_view] entered, room={room}")
     if room is None:
-        print(f"[room_view] room is None, returning early")
+        print("[room_view] room is None, returning early")
         return
 
     page.bgcolor = "#efeae2"
-    print(f"[room_view] creating widgets...")
+    print("[room_view] creating widgets...")
 
     messages_list = flet.ListView(
         expand=True,
@@ -32,23 +57,67 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
     file_picker: flet.FilePicker = flet.FilePicker()
 
-    attached_files: list[flet.FilePickerFile] = []
+    # Paths of files selected via FilePicker (no in-memory bytes)
+    attached_file_paths: list[tuple[str, str]] = []  # (path, display_name)
     attached_preview = flet.Row(scroll="auto", spacing=6)
 
+    _MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
+
     async def pick_file(e):
-        files = await file_picker.pick_files(allow_multiple=True)
-        
+        # pick_files without with_data=True — we only need paths
+        files = await file_picker.pick_files(allow_multiple=True, with_data=False)
+
         if files is not None:
-            for file in files:
-                attached_files.append(file)
+            oversized = []
+            for f in files:
+                path = f.path
+                if not path:
+                    continue
+                try:
+                    size = os.path.getsize(path)
+                except OSError:
+                    size = 0
+                if size > _MAX_FILE_SIZE:
+                    oversized.append(f.name)
+                else:
+                    attached_file_paths.append((path, f.name))
+            if oversized:
+                page.snack_bar = flet.SnackBar(
+                    flet.Text(
+                        f"Файл(ы) превышают 100 МБ: {', '.join(oversized)}",
+                        color="#ffffff",
+                    ),
+                    open=True,
+                    bgcolor="#ea4335",
+                )
+                page.update()
 
+        _rebuild_attached_preview()
+        page.update()
+
+    def _rebuild_attached_preview() -> None:
         attached_preview.controls.clear()
-
-        for f in attached_files:
+        for i, (path, name) in enumerate(attached_file_paths):
+            idx = i
             attached_preview.controls.append(
-                flet.Text(f.name, size=12)
+                flet.Row(
+                    spacing=4,
+                    controls=[
+                        flet.Icon(flet.Icons.ATTACH_FILE, size=14, color="#008069"),
+                        flet.Text(name, size=12),
+                        flet.IconButton(
+                            icon=flet.Icons.CLOSE,
+                            icon_size=14,
+                            on_click=lambda e, i=idx: _remove_attached_file(i),
+                        ),
+                    ],
+                )
             )
 
+    def _remove_attached_file(idx: int) -> None:
+        if 0 <= idx < len(attached_file_paths):
+            attached_file_paths.pop(idx)
+        _rebuild_attached_preview()
         page.update()
 
     message_input = flet.TextField(
@@ -59,9 +128,9 @@ def room_view(page: flet.Page, state: AppState) -> None:
         bgcolor="#ffffff",
         filled=True,
         border_color=flet.Colors.TRANSPARENT,
-        color=flet.Colors.BLACK
+        color=flet.Colors.BLACK,
     )
-    print(f"[room_view] message_input ok")
+    print("[room_view] message_input ok")
 
     reconnecting_banner = flet.Container(
         content=flet.Text(
@@ -76,9 +145,15 @@ def room_view(page: flet.Page, state: AppState) -> None:
         border_radius=4,
         alignment=flet.alignment.Alignment(0, 0),
     )
-    print(f"[room_view] reconnecting_banner ok")
+    print("[room_view] reconnecting_banner ok")
 
-    _state: dict = {"min_id": None, "loading_older": False, "ws_client": None, "user_at_bottom": True, "messages_data": []}
+    _state: dict = {
+        "min_id": None,
+        "loading_older": False,
+        "ws_client": None,
+        "user_at_bottom": True,
+        "messages_data": [],
+    }
 
     # User profile bottom sheet
     _profile_sheet_content = flet.Column(tight=True, spacing=8, width=320)
@@ -91,13 +166,54 @@ def room_view(page: flet.Page, state: AppState) -> None:
     )
 
     page.overlay.append(_profile_sheet)
-    print(f"[room_view] profile_sheet ok")
+    print("[room_view] profile_sheet ok")
+
+    # --- File progress overlay ---
+    _progress_label = flet.Text("", size=12, color="#ffffff", weight=flet.FontWeight.W_500)
+    _progress_bar = flet.ProgressBar(value=0, bgcolor="#ffffff30", color="#ffffff", width=260)
+    _progress_pct = flet.Text("0%", size=11, color="#ffffffcc")
+    _progress_overlay = flet.Container(
+        content=flet.Column(
+            controls=[
+                _progress_label,
+                flet.Row(controls=[_progress_bar, _progress_pct], spacing=8, vertical_alignment=flet.CrossAxisAlignment.CENTER),
+            ],
+            spacing=4,
+            tight=True,
+        ),
+        bgcolor="#008069",
+        padding=flet.padding.symmetric(horizontal=16, vertical=10),
+        border_radius=flet.border_radius.only(top_left=8, top_right=8),
+        visible=False,
+        shadow=flet.BoxShadow(blur_radius=8, color="#00000040"),
+    )
+
+    def _show_progress(label: str) -> None:
+        _progress_label.value = label
+        _progress_bar.value = 0
+        _progress_pct.value = "0%"
+        _progress_overlay.visible = True
+        page.update()
+
+    def _update_progress(done: int, total: int) -> None:
+        if total > 0:
+            pct = done / total
+            _progress_bar.value = pct
+            _progress_pct.value = f"{int(pct * 100)}%"
+        else:
+            _progress_bar.value = None  # indeterminate
+            _progress_pct.value = "…"
+        page.update()
+
+    def _hide_progress() -> None:
+        _progress_overlay.visible = False
+        page.update()
 
     # Emoji picker callbacks
     def _on_emoji_selected(emoji_char: str) -> None:
         """Insert emoji at cursor position or at end of message."""
         current_value = message_input.value or ""
-        
+
         # TextField doesn't expose cursor_position, so just append to end
         new_value = current_value + emoji_char
         message_input.value = new_value
@@ -109,13 +225,13 @@ def room_view(page: flet.Page, state: AppState) -> None:
         page.update()
 
     # Create emoji picker
-    print(f"[room_view] creating EmojiPicker...")
+    print("[room_view] creating EmojiPicker...")
     emoji_picker = EmojiPicker(
         on_emoji_selected=_on_emoji_selected,
         on_close=_on_emoji_picker_close,
     )
     page.overlay.append(emoji_picker)
-    print(f"[room_view] EmojiPicker ok")
+    print("[room_view] EmojiPicker ok")
 
     def _toggle_emoji_picker(e: flet.ControlEvent) -> None:
         """Toggle emoji picker visibility."""
@@ -141,9 +257,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
             _profile_sheet_content.controls += [
                 flet.Row(
                     controls=[
-                        flet.Icon(
-                            flet.Icons.ACCOUNT_CIRCLE, size=48, color="#008069"
-                        ),
+                        flet.Icon(flet.Icons.ACCOUNT_CIRCLE, size=48, color="#008069"),
                         flet.Column(
                             controls=[
                                 flet.Text(
@@ -152,9 +266,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                                     weight=flet.FontWeight.BOLD,
                                     color="#111b21",
                                 ),
-                                flet.Text(
-                                    dn, size=14, color="#667781"
-                                )
+                                flet.Text(dn, size=14, color="#667781")
                                 if dn
                                 else flet.Text(
                                     t("room.no_display_name"),
@@ -174,7 +286,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     controls=[
                         flet.Icon(flet.Icons.BADGE, size=18, color="#667781"),
                         flet.Text(
-                            t("room.username_label", username=data.get('username', '')),
+                            t("room.username_label", username=data.get("username", "")),
                             size=14,
                             color="#111b21",
                         ),
@@ -185,7 +297,9 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     controls=[
                         flet.Icon(flet.Icons.LABEL, size=18, color="#667781"),
                         flet.Text(
-                            t("room.display_name_label", name=dn or "—"), size=14, color="#111b21"
+                            t("room.display_name_label", name=dn or "—"),
+                            size=14,
+                            color="#111b21",
                         ),
                     ],
                     spacing=8,
@@ -199,9 +313,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
             page.update()
         except Exception as exc:
             _profile_sheet_content.controls.clear()
-            _profile_sheet_content.controls.append(
-                flet.Text(str(exc), color="#ea4335")
-            )
+            _profile_sheet_content.controls.append(flet.Text(str(exc), color="#ea4335"))
             page.update()
         finally:
             await client.aclose()
@@ -219,10 +331,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         if isinstance(ts_raw, str) and "T" in ts_raw:
             ts = ts_raw.split("T")[1][:5]
 
-        is_me = (
-            state.current_user is not None
-            and author == state.current_user.username
-        )
+        is_me = state.current_user is not None and author == state.current_user.username
 
         alignment = state.message_alignment
         if alignment == "right":
@@ -237,41 +346,127 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
         file_controls = []
 
-        for f in msg.get("files", []):
-            file_id_val = f["id"]
-            file_name_val = f.get("filename", "download")
+        for file_item in msg.get("files", []):
+            file_id_val = file_item["id"]
+            file_name_val = file_item.get("filename", "download")
+            # Attach message author as uploader_username fallback for key lookup
+            if "uploader_username" not in file_item:
+                file_item = dict(file_item)
+                file_item.setdefault("uploader_username", msg.get("author_username"))
 
-            async def local_download_task(fid: int, fname: str):
+            async def local_download_task(fid: int, fname: str, file_meta: dict):
+                import base64
+                import tempfile
+                from crypto.file_crypto import FileDecryptor
+                from crypto.key_generator import KeyGenerator
+
                 client = APIClient(base_url=API_URL, state=state)
                 try:
                     url = f"{API_URL}/rooms/{room.id}/files/{fid}/download"
+                    is_encrypted = file_meta.get("is_encrypted")
+                    is_own = (
+                        state.current_user is not None
+                        and file_meta.get("uploader_id") == state.current_user.id
+                    )
 
-                    save_path = await file_picker.save_file(file_name=fname, file_type=flet.FilePickerFileType.ANY)
+                    # Resolve sender keys before download
+                    sender_keys = None
+                    if is_encrypted and not is_own:
+                        sender_username = file_meta.get("uploader_username") or file_meta.get("author_username")
+                        if sender_username and state.public_key_cache:
+                            sender_keys = state.public_key_cache.get_public_keys(sender_username)
+                        if not sender_keys and sender_username:
+                            kd = await client.get_public_keys(sender_username)
+                            ed_pub = KeyGenerator.load_ed25519_public_key(base64.b64decode(kd["identity_pub_ed25519"]))
+                            x_pub = KeyGenerator.load_x25519_public_key(base64.b64decode(kd["identity_pub_x25519"]))
+                            sender_keys = {"ed25519_pub": ed_pub, "x25519_pub": x_pub}
+                            if state.public_key_cache:
+                                state.public_key_cache.set_public_keys(sender_username, ed_pub, x_pub)
 
+                    # Ask user where to save first
+                    save_path = await file_picker.save_file(
+                        file_name=fname,
+                        file_type=flet.FilePickerFileType.ANY,
+                    )
                     if not save_path:
-                        return
+                        return  # user cancelled
 
-                    async with httpx.AsyncClient() as http:
-                        r = await http.get(url, headers=client._headers())
-                        r.raise_for_status()
+                    download_timeout = httpx.Timeout(connect=5.0, read=300.0, write=10.0, pool=5.0)
 
-                        with open(save_path, "wb") as f_save:
-                            f_save.write(r.content)
+                    if is_encrypted:
+                        # Stream → temp file → decrypt → save_path
+                        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".enc.tmp")
+                        os.close(tmp_fd)
+                        try:
+                            _show_progress(f"⬇ {fname}")
+                            async with httpx.AsyncClient(timeout=download_timeout) as http:
+                                async with http.stream("GET", url, headers=client._headers()) as r:
+                                    r.raise_for_status()
+                                    total = int(r.headers.get("content-length", 0))
+                                    done = 0
+                                    with open(tmp_path, "wb") as tmp_f:
+                                        async for chunk in r.aiter_bytes(256 * 1024):
+                                            tmp_f.write(chunk)
+                                            done += len(chunk)
+                                            _update_progress(done, total)
 
-                        page.snack_bar = flet.SnackBar(
-                            flet.Text(f"Downloaded {fname}", color="#fff"),
-                            open=True,
-                            bgcolor="#008069",
-                        )
+                            _progress_label.value = f"🔓 {fname}"
+                            _progress_bar.value = None  # indeterminate during decrypt
+                            _progress_pct.value = "…"
+                            page.update()
+
+                            decryptor = FileDecryptor()
+                            if is_own and file_meta.get("key_sender_blob"):
+                                await asyncio.to_thread(
+                                    _decrypt_file_to_path, decryptor, tmp_path, save_path,
+                                    key_sender_blob_b64=file_meta["key_sender_blob"],
+                                    x25519_priv=state.x25519_private,
+                                    own=True,
+                                )
+                            elif sender_keys and file_meta.get("key_blob") and file_meta.get("key_signature"):
+                                await asyncio.to_thread(
+                                    _decrypt_file_to_path, decryptor, tmp_path, save_path,
+                                    key_blob_b64=file_meta["key_blob"],
+                                    signature_b64=file_meta["key_signature"],
+                                    x25519_priv=state.x25519_private,
+                                    sender_ed25519_pub=sender_keys["ed25519_pub"],
+                                    own=False,
+                                )
+                            else:
+                                raise ValueError("Missing decryption keys")
+                        finally:
+                            _hide_progress()
+                            if os.path.exists(tmp_path):
+                                os.unlink(tmp_path)
+                    else:
+                        _show_progress(f"⬇ {fname}")
+                        try:
+                            async with httpx.AsyncClient(timeout=download_timeout) as http:
+                                async with http.stream("GET", url, headers=client._headers()) as r:
+                                    r.raise_for_status()
+                                    total = int(r.headers.get("content-length", 0))
+                                    done = 0
+                                    with open(save_path, "wb") as out_f:
+                                        async for chunk in r.aiter_bytes(256 * 1024):
+                                            out_f.write(chunk)
+                                            done += len(chunk)
+                                            _update_progress(done, total)
+                        finally:
+                            _hide_progress()
+
+                    page.snack_bar = flet.SnackBar(
+                        flet.Text(f"Скачано: {fname}", color="#fff"),
+                        open=True, bgcolor="#008069",
+                    )
                 except Exception as e:
+                    logging.error(f"[DOWNLOAD] Failed: {e}", exc_info=True)
                     page.snack_bar = flet.SnackBar(
                         flet.Text(str(e), color="#fff"),
-                        open=True,
-                        bgcolor="#ea4335",
+                        open=True, bgcolor="#ea4335",
                     )
                 finally:
                     await client.aclose()
-                page.update() # Ensure snackbar is visible
+                page.update()
 
             file_controls.append(
                 flet.Container(
@@ -299,15 +494,18 @@ def room_view(page: flet.Page, state: AppState) -> None:
                                     ),
                                 ],
                             ),
-
                             flet.IconButton(
                                 icon=flet.Icons.DOWNLOAD,
                                 icon_size=18,
                                 tooltip="Download",
-                                on_click=lambda e: page.run_task(
+                                on_click=lambda e,
+                                fid=file_id_val,
+                                fn=file_name_val,
+                                fm=file_item: page.run_task(
                                     local_download_task,
-                                    file_id_val,
-                                    file_name_val,
+                                    fid,
+                                    fn,
+                                    fm,
                                 ),
                             ),
                         ],
@@ -379,7 +577,11 @@ def room_view(page: flet.Page, state: AppState) -> None:
         # Set initial state (bubble is the first control — either spacer or container)
         # Find the Container (bubble) — it's always the non-spacer control
         container = next(
-            (c for c in message_control.controls if isinstance(c, flet.Container) and c.content is not None),
+            (
+                c
+                for c in message_control.controls
+                if isinstance(c, flet.Container) and c.content is not None
+            ),
             None,
         )
         if container is None:
@@ -393,54 +595,296 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
     async def _smooth_scroll_to_bottom() -> None:
         """Smoothly scroll to the bottom of the chat area."""
-        print(f"[SCROLL] Starting smooth scroll to bottom...")
+        print("[SCROLL] Starting smooth scroll to bottom...")
         # Small delay to ensure UI is rendered
         import asyncio
+
         await asyncio.sleep(0.1)
         await messages_list.scroll_to(
             offset=-1,
             duration=400,
             curve=flet.AnimationCurve.EASE_OUT,
         )
-        print(f"[SCROLL] Smooth scroll completed")
+        print("[SCROLL] Smooth scroll completed")
 
     def _is_user_at_bottom() -> bool:
         """Check if user is scrolled near the bottom of the chat."""
         # We track this via on_scroll event
         return _state.get("user_at_bottom", True)
 
+    async def _decrypt_message_if_needed(msg: dict) -> dict:
+        """Decrypt message if it's encrypted, otherwise return as-is."""
+        if not msg.get("is_encrypted"):
+            return msg
+
+        # If current user is the sender, decrypt using the sender's own copy
+        if (
+            state.current_user is not None
+            and msg.get("author_username") == state.current_user.username
+        ):
+            sender_blob = msg.get("sender_encrypted_blob")
+            if not sender_blob:
+                # Old message without sender copy — just show placeholder
+                if not msg.get("body"):
+                    msg["body"] = t("room.encrypted_sent")
+                return msg
+
+            import base64
+            import logging
+            from crypto.message_crypto import MessageDecryptor
+            from cryptography.exceptions import InvalidTag
+
+            try:
+                decryptor = MessageDecryptor()
+                msg["body"] = decryptor.decrypt_own_message(
+                    sender_blob, state.x25519_private
+                )
+                msg["decrypted"] = True
+            except (InvalidTag, Exception) as exc:
+                logging.error(f"[DECRYPT] Failed to decrypt own message: {exc}")
+                msg["body"] = t("room.encrypted_sent")
+            return msg
+
+        # Message is encrypted, attempt to decrypt
+        import base64
+        import logging
+        from crypto.message_crypto import MessageDecryptor
+        from crypto.key_generator import KeyGenerator
+        from cryptography.exceptions import InvalidSignature, InvalidTag
+
+        try:
+            if not state.x25519_private or not state.ed25519_private:
+                logging.warning("[DECRYPT] No private keys available")
+                msg["body"] = t("room.encrypted_no_keys")
+                msg["decryption_error"] = True
+                return msg
+
+            # Get sender public keys
+            sender_username = msg.get("author_username")
+            if not sender_username:
+                logging.warning("[DECRYPT] No sender username in message")
+                msg["body"] = t("room.encrypted_unknown_sender")
+                msg["decryption_error"] = True
+                return msg
+
+            sender_keys = None
+            if state.public_key_cache:
+                sender_keys = state.public_key_cache.get_public_keys(sender_username)
+
+            if not sender_keys:
+                logging.info(f"[DECRYPT] Fetching public keys for {sender_username}")
+                client = APIClient(base_url=API_URL, state=state)
+                try:
+                    keys_data = await client.get_public_keys(sender_username)
+                    ed25519_pub_bytes = base64.b64decode(
+                        keys_data["identity_pub_ed25519"]
+                    )
+                    x25519_pub_bytes = base64.b64decode(
+                        keys_data["identity_pub_x25519"]
+                    )
+
+                    ed25519_pub = KeyGenerator.load_ed25519_public_key(
+                        ed25519_pub_bytes
+                    )
+                    x25519_pub = KeyGenerator.load_x25519_public_key(x25519_pub_bytes)
+
+                    sender_keys = {"ed25519_pub": ed25519_pub, "x25519_pub": x25519_pub}
+                    if state.public_key_cache:
+                        state.public_key_cache.set_public_keys(
+                            sender_username, ed25519_pub, x25519_pub
+                        )
+                finally:
+                    await client.aclose()
+
+            # Decrypt message
+            encrypted_blob = msg.get("encrypted_blob")
+            signature = msg.get("signature")
+
+            if not encrypted_blob or not signature:
+                logging.warning("[DECRYPT] Missing encrypted_blob or signature")
+                msg["body"] = t("room.encrypted_malformed")
+                msg["decryption_error"] = True
+                return msg
+
+            logging.info(f"[DECRYPT] Decrypting message from {sender_username}")
+            decryptor = MessageDecryptor()
+            encrypted_data = {"blob": encrypted_blob, "signature": signature}
+
+            plaintext = decryptor.decrypt_message(
+                encrypted_msg=encrypted_data,
+                recipient_x25519_priv=state.x25519_private,
+                sender_ed25519_pub=sender_keys["ed25519_pub"],
+            )
+
+            msg["body"] = plaintext
+            msg["decrypted"] = True
+            logging.info("[DECRYPT] Message decrypted successfully")
+            return msg
+
+        except InvalidSignature:
+            logging.error(
+                f"[DECRYPT] Signature verification failed for message from {sender_username}"
+            )
+            msg["body"] = t("room.encrypted_bad_signature")
+            msg["signature_error"] = True
+            return msg
+        except InvalidTag:
+            logging.error(
+                f"[DECRYPT] Decryption failed for message from {sender_username}"
+            )
+            msg["body"] = t("room.encrypted_bad_key")
+            msg["decryption_error"] = True
+            return msg
+        except Exception as exc:
+            logging.error(f"[DECRYPT] Unexpected error: {exc}", exc_info=True)
+            msg["body"] = t("room.encrypted_error", exc=exc)
+            msg["decryption_error"] = True
+            return msg
+
     def _on_ws_message(payload: dict) -> None:
-        print(f"[WS] Received raw payload: {payload}") # Log raw payload
-        if payload.get("type") == "message":
+        print(f"[WS] Received raw payload: {payload}")  # Log raw payload
+
+        msg_type = payload.get("type")
+
+        # Handle encrypted_message delivered directly to recipient via user-level WS
+        if msg_type == "encrypted_message":
+            raw = payload.get("payload", payload)
+            # Normalise field names to match the standard message format
+            msg: dict = {
+                "id": raw.get("message_id") or raw.get("id"),
+                "room_id": raw.get("room_id"),
+                "author_username": raw.get("sender_username")
+                or raw.get("author_username"),
+                "author_display_name": raw.get("author_display_name"),
+                "body": "",
+                "created_at": raw.get("created_at", ""),
+                "files": raw.get("files", []),
+                "is_encrypted": True,
+                "encrypted_blob": raw.get("encrypted_blob"),
+                "sender_encrypted_blob": raw.get("sender_encrypted_blob"),
+                "signature": raw.get("signature"),
+            }
+            # Only display if this message belongs to the currently open room
+            if msg["room_id"] != room.id:
+                return
+
+            async def decrypt_and_display_encrypted():
+                decrypted_msg = await _decrypt_message_if_needed(msg)
+                _state["messages_data"].append(decrypted_msg)
+                message_control = _build_message_tile(decrypted_msg)
+                messages_list.controls.append(message_control)
+                reconnecting_banner.visible = False
+                _animate_message(message_control)
+                page.update()
+                if _is_user_at_bottom():
+                    page.run_task(_smooth_scroll_to_bottom)
+
+            page.run_task(decrypt_and_display_encrypted)
+            return
+
+        if msg_type == "message":
             msg = payload.get("payload", payload)
-            print(f"[WS] Processed message payload: {msg}") # Log processed message
-            print(f"[WS] Files section in message: {msg.get('files', [])}") # Log files section
+            print(f"[WS] Processed message payload: {msg}")  # Log processed message
+            print(
+                f"[WS] Files section in message: {msg.get('files', [])}"
+            )  # Log files section
+
+            # Decrypt message if encrypted
+            if msg.get("is_encrypted"):
+                print("[WS] Message is encrypted, decrypting...")
+
+                # Run decryption in async task
+                async def decrypt_and_display():
+                    decrypted_msg = await _decrypt_message_if_needed(msg)
+
+                    # Check if this is our own message (optimistic update already shown)
+                    is_own_message = (
+                        state.current_user is not None
+                        and decrypted_msg.get("author_username")
+                        == state.current_user.username
+                    )
+
+                    # Check if we already have this message (by temporary ID or real ID)
+                    msg_id = decrypted_msg.get("id")
+                    temp_id = decrypted_msg.get("temp_id")
+                    already_exists = False
+
+                    if is_own_message:
+                        # Look for temporary message with matching temp_id or body
+                        for i, existing_msg in enumerate(_state["messages_data"]):
+                            if existing_msg.get(
+                                "temp_id"
+                            ) == temp_id or existing_msg.get("is_optimistic"):
+                                # Keep the original body from the optimistic message (encrypted
+                                # outgoing messages can't be decrypted by the sender)
+                                if decrypted_msg.get("is_encrypted"):
+                                    decrypted_msg["body"] = existing_msg.get(
+                                        "body", decrypted_msg.get("body", "")
+                                    )
+                                # Replace optimistic message with real one
+                                _state["messages_data"][i] = decrypted_msg
+                                messages_list.controls[i] = _build_message_tile(
+                                    decrypted_msg
+                                )
+                                already_exists = True
+                                print("[WS] Replaced optimistic message with real one")
+                                break
+
+                    if not already_exists:
+                        user_at_bottom = _is_user_at_bottom()
+                        print(f"[WS] User at bottom: {user_at_bottom}")
+
+                        _state["messages_data"].append(decrypted_msg)
+                        message_control = _build_message_tile(decrypted_msg)
+                        messages_list.controls.append(message_control)
+                        print(
+                            f"[WS] Added message to list, total messages: {len(messages_list.controls)}"
+                        )
+
+                        reconnecting_banner.visible = False
+                        _animate_message(message_control)
+                        print("[WS] Animated message")
+
+                    page.update()
+                    print("[WS] Updated page")
+
+                    # Only scroll to bottom if user was already at bottom
+                    if not already_exists:
+                        user_at_bottom = _is_user_at_bottom()
+                        if user_at_bottom:
+                            print("[WS] Scrolling to bottom...")
+                            page.run_task(_smooth_scroll_to_bottom)
+                        else:
+                            print("[WS] Not scrolling - user not at bottom")
+
+                page.run_task(decrypt_and_display)
+                return
 
             # Check if this is our own message (optimistic update already shown)
             is_own_message = (
                 state.current_user is not None
                 and msg.get("author_username") == state.current_user.username
             )
-            
+
             # Check if we already have this message (by temporary ID or real ID)
             msg_id = msg.get("id")
             temp_id = msg.get("temp_id")
             already_exists = False
-            
+
             if is_own_message:
                 # Look for temporary message with matching temp_id or body
                 for i, existing_msg in enumerate(_state["messages_data"]):
                     if existing_msg.get("temp_id") == temp_id or (
-                        existing_msg.get("is_optimistic") and 
-                        existing_msg.get("body") == msg.get("body")
+                        existing_msg.get("is_optimistic")
+                        and existing_msg.get("body") == msg.get("body")
                     ):
                         # Replace optimistic message with real one
                         _state["messages_data"][i] = msg
                         messages_list.controls[i] = _build_message_tile(msg)
                         already_exists = True
-                        print(f"[WS] Replaced optimistic message with real one")
+                        print("[WS] Replaced optimistic message with real one")
                         break
-            
+
             if not already_exists:
                 user_at_bottom = _is_user_at_bottom()
                 print(f"[WS] User at bottom: {user_at_bottom}")
@@ -448,23 +892,25 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 _state["messages_data"].append(msg)
                 message_control = _build_message_tile(msg)
                 messages_list.controls.append(message_control)
-                print(f"[WS] Added message to list, total messages: {len(messages_list.controls)}")
-                
+                print(
+                    f"[WS] Added message to list, total messages: {len(messages_list.controls)}"
+                )
+
                 reconnecting_banner.visible = False
                 _animate_message(message_control)
-                print(f"[WS] Animated message")
-            
+                print("[WS] Animated message")
+
             page.update()
-            print(f"[WS] Updated page")
-            
+            print("[WS] Updated page")
+
             # Only scroll to bottom if user was already at bottom
             if not already_exists:
                 user_at_bottom = _is_user_at_bottom()
                 if user_at_bottom:
-                    print(f"[WS] Scrolling to bottom...")
+                    print("[WS] Scrolling to bottom...")
                     page.run_task(_smooth_scroll_to_bottom)
                 else:
-                    print(f"[WS] Not scrolling - user not at bottom")
+                    print("[WS] Not scrolling - user not at bottom")
 
     def _on_reconnecting(delay: float) -> None:
         reconnecting_banner.visible = True
@@ -473,13 +919,13 @@ def room_view(page: flet.Page, state: AppState) -> None:
     async def _load_messages(before_id: int | None = None) -> list[dict]:
         client = APIClient(base_url=API_URL, state=state)
         try:
-            return await client.get_messages(
-                room.id, before_id=before_id, limit=50
-            )
+            return await client.get_messages(room.id, before_id=before_id, limit=50)
         except AuthError:
             state.token = None
             page.snack_bar = flet.SnackBar(
-                flet.Text(t("room.session_expired"), color="#ffffff"), open=True, bgcolor="#ea4335"
+                flet.Text(t("room.session_expired"), color="#ffffff"),
+                open=True,
+                bgcolor="#ea4335",
             )
             page.update()
             from views.login_view import login_view
@@ -487,14 +933,16 @@ def room_view(page: flet.Page, state: AppState) -> None:
             login_view(page, state)
             return []
         except Exception as exc:
-            page.snack_bar = flet.SnackBar(flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335")
+            page.snack_bar = flet.SnackBar(
+                flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335"
+            )
             page.update()
             return []
         finally:
             await client.aclose()
 
     async def _initial_load() -> None:
-        print(f"[INIT] Starting initial message load...")
+        print("[INIT] Starting initial message load...")
 
         # Auto-join public rooms if not already a member
         if room.room_type == "public":
@@ -511,21 +959,31 @@ def room_view(page: flet.Page, state: AppState) -> None:
         msgs = await _load_messages()
         msgs_sorted = sorted(msgs, key=lambda m: m["id"])
         print(f"[INIT] Loaded {len(msgs_sorted)} messages")
-        
-        if msgs_sorted:
-            _state["min_id"] = msgs_sorted[0]["id"]
-            _state["messages_data"] = msgs_sorted
-            for m in msgs_sorted:
+
+        # Decrypt encrypted messages
+        decrypted_msgs = []
+        for m in msgs_sorted:
+            if m.get("is_encrypted"):
+                print(f"[INIT] Decrypting message {m.get('id')}")
+                decrypted_msg = await _decrypt_message_if_needed(m)
+                decrypted_msgs.append(decrypted_msg)
+            else:
+                decrypted_msgs.append(m)
+
+        if decrypted_msgs:
+            _state["min_id"] = decrypted_msgs[0]["id"]
+            _state["messages_data"] = decrypted_msgs
+            for m in decrypted_msgs:
                 messages_list.controls.append(_build_message_tile(m))
-            print(f"[INIT] Added {len(msgs_sorted)} messages to UI")
-        
+            print(f"[INIT] Added {len(decrypted_msgs)} messages to UI")
+
         page.update()
-        print(f"[INIT] Updated page, now scrolling to bottom...")
-        
+        print("[INIT] Updated page, now scrolling to bottom...")
+
         # Ensure user is marked as at bottom for initial load
         _state["user_at_bottom"] = True
         await _smooth_scroll_to_bottom()
-        print(f"[INIT] Initial load complete")
+        print("[INIT] Initial load complete")
 
     async def _load_older() -> None:
         if _state["loading_older"] or _state["min_id"] is None:
@@ -534,10 +992,21 @@ def room_view(page: flet.Page, state: AppState) -> None:
         msgs = await _load_messages(before_id=_state["min_id"])
         if msgs:
             msgs_sorted = sorted(msgs, key=lambda m: m["id"])
-            _state["min_id"] = msgs_sorted[0]["id"]
-            new_tiles = [_build_message_tile(m) for m in msgs_sorted]
+
+            # Decrypt encrypted messages
+            decrypted_msgs = []
+            for m in msgs_sorted:
+                if m.get("is_encrypted"):
+                    print(f"[LOAD_OLDER] Decrypting message {m.get('id')}")
+                    decrypted_msg = await _decrypt_message_if_needed(m)
+                    decrypted_msgs.append(decrypted_msg)
+                else:
+                    decrypted_msgs.append(m)
+
+            _state["min_id"] = decrypted_msgs[0]["id"]
+            new_tiles = [_build_message_tile(m) for m in decrypted_msgs]
             # Insert older messages at the top (data too)
-            _state["messages_data"] = msgs_sorted + _state["messages_data"]
+            _state["messages_data"] = decrypted_msgs + _state["messages_data"]
             messages_list.controls = new_tiles + messages_list.controls
             page.update()
             # Scroll to the first of the previously visible messages to keep reading position
@@ -547,99 +1016,321 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     duration=0,
                 )
         _state["loading_older"] = False
+        _state["loading_older"] = False
 
     async def _send_message() -> None:
         body = (message_input.value or "").strip()
 
-        if not body and attached_files:
+        if not body and attached_file_paths:
             body = "📎"
 
         print(f"[SEND] Attempting to send message: '{body}'")
-        if not body and not attached_files:
-            print(f"[SEND] Empty message, aborting")
+        if not body and not attached_file_paths:
+            print("[SEND] Empty message, aborting")
             return
         ws: WsClient | None = _state.get("ws_client")
         if ws is None:
-            print(f"[SEND] No WebSocket client available")
+            print("[SEND] No WebSocket client available")
             return
         try:
             # Mark user as "at bottom" when sending a message
-            print(f"[SEND] Setting user_at_bottom = True")
+            print("[SEND] Setting user_at_bottom = True")
             _state["user_at_bottom"] = True
-            
+
             # Resolve emoji shortcodes before sending
             resolved_body = resolve_shortcodes(body)
-            
+
             # Create optimistic message for immediate display
             import time
+
             temp_id = f"temp_{int(time.time() * 1000)}"
             optimistic_msg = {
                 "id": None,
                 "temp_id": temp_id,
                 "body": resolved_body,
                 "files": [],
-                "author_username": state.current_user.username if state.current_user else "?",
-                "author_display_name": state.current_user.display_name if state.current_user else None,
+                "author_username": state.current_user.username
+                if state.current_user
+                else "?",
+                "author_display_name": state.current_user.display_name
+                if state.current_user
+                else None,
                 "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                 "is_optimistic": True,
             }
-            
+
             # Add optimistic message to UI immediately
             _state["messages_data"].append(optimistic_msg)
             message_control = _build_message_tile(optimistic_msg)
             messages_list.controls.append(message_control)
             _animate_message(message_control)
-            
+
             # Clear input and update UI
             message_input.value = ""
-            print(f"[SEND] Cleared input field and added optimistic message")
+            print("[SEND] Cleared input field and added optimistic message")
             page.update()
-            
+
             # Scroll to bottom
             page.run_task(_smooth_scroll_to_bottom)
-            
-            # Send message via WebSocket
-            print(f"[SEND] Sending message via WebSocket...")
+
+            # Send message via WebSocket or encrypted API
+            print("[SEND] Sending message...")
             client = APIClient(base_url=API_URL, state=state)
 
             try:
-                # Upload files first
+                # Upload files first (streaming — no full file in memory)
                 uploaded_files = []
+                is_personal = room.room_type == "personal"
 
-                for f in attached_files:
-                    with open(f.path, "rb") as file_data:
-                        files = {"file": (f.name, file_data)}
-                        async with httpx.AsyncClient() as http:
+                # Resolve E2EE recipient keys once for all files
+                e2ee_recipient_keys = None
+                e2ee_recipient_username = None
+                if is_personal and state.ed25519_private and state.x25519_private and state.current_user:
+                    parts = room.name.split(", ")
+                    e2ee_recipient_username = next(
+                        (p for p in parts if p != state.current_user.username), None
+                    )
+                    if e2ee_recipient_username:
+                        if state.public_key_cache:
+                            e2ee_recipient_keys = state.public_key_cache.get_public_keys(e2ee_recipient_username)
+                        if not e2ee_recipient_keys:
+                            import base64
+                            from crypto.key_generator import KeyGenerator
+                            kd = await client.get_public_keys(e2ee_recipient_username)
+                            r_x25519_pub = KeyGenerator.load_x25519_public_key(base64.b64decode(kd["identity_pub_x25519"]))
+                            r_ed25519_pub = KeyGenerator.load_ed25519_public_key(base64.b64decode(kd["identity_pub_ed25519"]))
+                            e2ee_recipient_keys = {"x25519_pub": r_x25519_pub, "ed25519_pub": r_ed25519_pub, "user_id": kd.get("user_id", "")}
+                            if state.public_key_cache:
+                                state.public_key_cache.set_public_keys(e2ee_recipient_username, r_ed25519_pub, r_x25519_pub, str(kd.get("user_id", "")))
+
+                for file_path, file_name in attached_file_paths:
+                    import base64
+                    import tempfile
+                    from crypto.file_crypto import FileEncryptor
+                    key_blob = None
+                    key_sender_blob = None
+                    key_signature = None
+
+                    if e2ee_recipient_keys and state.ed25519_private and state.x25519_private and state.current_user:
+                        # Stream-encrypt into a temp file — never loads full file into memory
+                        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".enc")
+                        tmp_path = tmp.name
+                        tmp.close()
+                        try:
+                            enc = FileEncryptor()
+
+                            def _do_encrypt():
+                                with open(tmp_path, "wb") as dst_f:
+                                    return enc.encrypt_file_streaming(
+                                        file_path, dst_f, file_name,
+                                        e2ee_recipient_keys["x25519_pub"],
+                                        state.ed25519_private,
+                                        state.x25519_private.public_key(),
+                                        str(state.current_user.id),
+                                        str(e2ee_recipient_keys.get("user_id", "")),
+                                    )
+
+                            meta = await asyncio.to_thread(_do_encrypt)
+                            key_blob = meta["key_blob"]
+                            key_sender_blob = meta["key_sender_blob"]
+                            key_signature = meta["signature"]
+                            upload_path = tmp_path
+                        except Exception as enc_exc:
+                            logging.error(f"[FILE] Encryption failed: {enc_exc}", exc_info=True)
+                            upload_path = file_path  # fall back to plaintext
+                            tmp_path = None
+                    else:
+                        upload_path = file_path
+                        tmp_path = None
+
+                    try:
+                        # Stream upload with progress via _TrackingFile wrapper
+                        upload_timeout = httpx.Timeout(connect=5.0, read=300.0, write=300.0, pool=5.0)
+                        file_size = os.path.getsize(upload_path)
+                        _show_progress(f"⬆ {file_name}")
+
+                        # Raw body upload — no multipart, no Starlette buffering
+                        upload_headers = {
+                            **client._headers(),
+                            "X-Filename": file_name,
+                            "Content-Type": "application/octet-stream",
+                            "Content-Length": str(file_size),
+                        }
+                        if key_blob:
+                            upload_headers["X-Key-Blob"] = key_blob
+                            upload_headers["X-Key-Sender-Blob"] = key_sender_blob
+                            upload_headers["X-Key-Signature"] = key_signature
+
+                        done_bytes = 0
+
+                        async def _body_chunks():
+                            nonlocal done_bytes
+                            with open(upload_path, "rb") as fh:
+                                while True:
+                                    chunk = fh.read(256 * 1024)
+                                    if not chunk:
+                                        break
+                                    done_bytes += len(chunk)
+                                    _update_progress(done_bytes, file_size)
+                                    yield chunk
+
+                        async with httpx.AsyncClient(timeout=upload_timeout) as http:
                             response = await http.post(
                                 f"{API_URL}/rooms/{room.id}/files",
-                                headers=client._headers(),
-                                files={"file": (f.name, open(f.path, "rb"))},
+                                headers=upload_headers,
+                                content=_body_chunks(),
                             )
-                            response.raise_for_status()
-                            uploaded_files.append(response.json())
+                        response.raise_for_status()
+                        uploaded_files.append(response.json())
+                    finally:
+                        _hide_progress()
+                        if tmp_path and os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
 
-                # Send message with file metadata
-                print(f"[SEND] Sending message with files: {uploaded_files}")
-                await ws.send_message(room.id, resolved_body, files=uploaded_files)
+                # Check if this is a personal chat and we should encrypt
+                should_encrypt = False
+                recipient_username = None
 
-                # re-render
-                if attached_files:
+                if is_personal and state.ed25519_private and state.x25519_private:
+                    # Extract recipient username from room name
+                    # Personal chat names are formatted as "user1, user2"
+                    parts = room.name.split(", ")
+                    recipient_username = next(
+                        (p for p in parts if p != state.current_user.username), None
+                    )
+
+                    if recipient_username:
+                        print(
+                            f"[SEND] Personal chat detected, attempting E2EE with {recipient_username}"
+                        )
+                        should_encrypt = True
+
+                if should_encrypt and recipient_username:
+                    try:
+                        import base64
+                        import logging
+                        from crypto.message_crypto import MessageEncryptor
+                        from crypto.key_generator import KeyGenerator
+
+                        # Fetch recipient public keys
+                        recipient_keys = None
+                        keys_data = None
+                        if state.public_key_cache:
+                            recipient_keys = state.public_key_cache.get_public_keys(
+                                recipient_username
+                            )
+
+                        if not recipient_keys:
+                            logging.info(
+                                f"[SEND] Fetching public keys for {recipient_username}"
+                            )
+                            keys_data = await client.get_public_keys(recipient_username)
+                            ed25519_pub_bytes = base64.b64decode(
+                                keys_data["identity_pub_ed25519"]
+                            )
+                            x25519_pub_bytes = base64.b64decode(
+                                keys_data["identity_pub_x25519"]
+                            )
+
+                            ed25519_pub = KeyGenerator.load_ed25519_public_key(
+                                ed25519_pub_bytes
+                            )
+                            x25519_pub = KeyGenerator.load_x25519_public_key(
+                                x25519_pub_bytes
+                            )
+
+                            recipient_keys = {
+                                "ed25519_pub": ed25519_pub,
+                                "x25519_pub": x25519_pub,
+                                "user_id": keys_data.get("user_id", ""),
+                            }
+                            if state.public_key_cache:
+                                state.public_key_cache.set_public_keys(
+                                    recipient_username,
+                                    ed25519_pub,
+                                    x25519_pub,
+                                    str(keys_data.get("user_id", "")),
+                                )
+
+                        recipient_id = str(
+                            recipient_keys.get("user_id", "")
+                            if isinstance(recipient_keys, dict)
+                            else ""
+                        )
+
+                        # Encrypt message
+                        logging.info(
+                            f"[SEND] Encrypting message for {recipient_username}"
+                        )
+                        encryptor = MessageEncryptor()
+                        encrypted_data = encryptor.encrypt_message(
+                            plaintext=resolved_body,
+                            recipient_x25519_pub=recipient_keys["x25519_pub"],
+                            sender_ed25519_priv=state.ed25519_private,
+                            sender_x25519_pub=state.x25519_private.public_key(),
+                            sender_id=str(state.current_user.id),
+                            recipient_id=recipient_id,
+                        )
+
+                        # Send encrypted message via API
+                        logging.info("[SEND] Sending encrypted message via API")
+                        await client.send_encrypted_message(
+                            room_id=room.id,
+                            recipient_username=recipient_username,
+                            encrypted_blob_b64=encrypted_data["blob"],
+                            sender_encrypted_blob_b64=encrypted_data["sender_blob"],
+                            signature_b64=encrypted_data["signature"],
+                            file_ids=[f["id"] for f in uploaded_files if f.get("id")],
+                        )
+                        logging.info("[SEND] Encrypted message sent successfully")
+                    except Exception as enc_exc:
+                        import logging
+
+                        logging.error(
+                            f"[SEND] Encryption/send failed: {enc_exc}", exc_info=True
+                        )
+                        # Remove the optimistic message — it was never delivered
+                        if _state["messages_data"] and _state["messages_data"][-1].get(
+                            "is_optimistic"
+                        ):
+                            _state["messages_data"].pop()
+                            if messages_list.controls:
+                                messages_list.controls.pop()
+                        page.snack_bar = flet.SnackBar(
+                            flet.Text(
+                                t("room.send_error", exc=enc_exc), color="#ffffff"
+                            ),
+                            open=True,
+                            bgcolor="#ea4335",
+                        )
+                        page.update()
+                        return
+                else:
+                    # Send plaintext via WebSocket (group chat or no keys)
+                    print("[SEND] Sending plaintext message via WebSocket")
+                    await ws.send_message(room.id, resolved_body, files=uploaded_files)
+
+                # re-render optimistic tile with real file info
+                if attached_file_paths and uploaded_files:
                     _state["messages_data"][-1]["files"] = uploaded_files
-
                     messages_list.controls[-1] = _build_message_tile(
                         _state["messages_data"][-1]
                     )
                     page.update()
 
                 # Clear attached files after sending
-                attached_files.clear()
+                attached_file_paths.clear()
+                _rebuild_attached_preview()
+                page.update()
 
             finally:
                 await client.aclose()
-            print(f"[SEND] Message sent")
+            print("[SEND] Message sent")
         except Exception as exc:
             print(f"[SEND] Error sending message: {exc}")
-            page.snack_bar = flet.SnackBar(flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335")
+            page.snack_bar = flet.SnackBar(
+                flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335"
+            )
             page.update()
 
     def _on_scroll(e: flet.OnScrollEvent) -> None:
@@ -648,15 +1339,19 @@ def room_view(page: flet.Page, state: AppState) -> None:
             distance_from_bottom = e.max_scroll_extent - e.pixels
             was_at_bottom = _state.get("user_at_bottom", True)
             is_at_bottom = distance_from_bottom < 100
-            
+
             if was_at_bottom != is_at_bottom:
-                print(f"[SCROLL] User position changed: at_bottom={is_at_bottom} (distance={distance_from_bottom:.1f}px)")
-            
+                print(
+                    f"[SCROLL] User position changed: at_bottom={is_at_bottom} (distance={distance_from_bottom:.1f}px)"
+                )
+
             _state["user_at_bottom"] = is_at_bottom
-            
+
             # Load older messages when scrolled to top
             if e.pixels <= 50:
-                print(f"[SCROLL] Near top (pixels={e.pixels}), loading older messages...")
+                print(
+                    f"[SCROLL] Near top (pixels={e.pixels}), loading older messages..."
+                )
                 page.run_task(_load_older)
 
     messages_list.on_scroll = _on_scroll
@@ -671,21 +1366,34 @@ def room_view(page: flet.Page, state: AppState) -> None:
     state.on_alignment_change = _rebuild_messages
 
     async def _start_ws() -> None:
-        # Close any existing room WebSocket before opening a new one
-        state.close_room_ws()
+        if state.ws is not None:
+            # Reuse existing connection — just update callbacks and room subscription
+            state.ws._on_room_message = _on_ws_message
+            state.ws._on_reconnecting = _on_reconnecting
+            state.ws.set_room(room.id)
+            _state["ws_client"] = state.ws
+            logger.debug(
+                "[room_view] Reusing existing WS, switched to room %s", room.id
+            )
+            return
 
-        ws = WsClient(
+        # No existing connection — create a new unified client
+        ws = UnifiedWsClient(
             token=state.token or "",
-            room_id=room.id,
-            on_message=_on_ws_message,
+            on_room_message=_on_ws_message,
             on_reconnecting=_on_reconnecting,
         )
+        ws.set_room(room.id)
         _state["ws_client"] = ws
-        state.room_ws = ws
+        state.ws = ws
         await ws.connect()
 
     def _go_back(e: flet.ControlEvent) -> None:
-        state.close_room_ws()
+        # Clear room-specific callbacks but keep the connection alive for notifications
+        if state.ws is not None:
+            state.ws._on_room_message = None
+            state.ws._on_reconnecting = None
+            state.ws.set_room(None)
         state.on_alignment_change = None
         _state["ws_client"] = None
         state.active_room = None
@@ -716,9 +1424,9 @@ def room_view(page: flet.Page, state: AppState) -> None:
             invite_dialog.open = False
             invite_username_field.value = ""
             page.snack_bar = flet.SnackBar(
-                flet.Text(t("room.invite_success", username=username), color="#ffffff"), 
-                open=True, 
-                bgcolor="#008069"
+                flet.Text(t("room.invite_success", username=username), color="#ffffff"),
+                open=True,
+                bgcolor="#008069",
             )
             page.update()
         except Exception as exc:
@@ -729,11 +1437,23 @@ def room_view(page: flet.Page, state: AppState) -> None:
             await client.aclose()
 
     invite_dialog = flet.AlertDialog(
-        title=flet.Text(t("room.invite_user"), weight=flet.FontWeight.BOLD, color="#111b21"),
-        content=flet.Column(controls=[invite_username_field, invite_error], tight=True, spacing=8),
+        title=flet.Text(
+            t("room.invite_user"), weight=flet.FontWeight.BOLD, color="#111b21"
+        ),
+        content=flet.Column(
+            controls=[invite_username_field, invite_error], tight=True, spacing=8
+        ),
         actions=[
-            flet.TextButton(t("room.cancel"), on_click=lambda e: _close_invite_dialog(), style=flet.ButtonStyle(color="#008069")),
-            flet.ElevatedButton(t("room.invite"), on_click=_do_invite, style=flet.ButtonStyle(bgcolor="#008069", color="#ffffff")),
+            flet.TextButton(
+                t("room.cancel"),
+                on_click=lambda e: _close_invite_dialog(),
+                style=flet.ButtonStyle(color="#008069"),
+            ),
+            flet.ElevatedButton(
+                t("room.invite"),
+                on_click=_do_invite,
+                style=flet.ButtonStyle(bgcolor="#008069", color="#ffffff"),
+            ),
         ],
     )
 
@@ -763,12 +1483,14 @@ def room_view(page: flet.Page, state: AppState) -> None:
             name = room.name
             if state.current_user and state.current_user.username in name:
                 parts = name.split(", ")
-                return next((p for p in parts if p != state.current_user.username), name)
+                return next(
+                    (p for p in parts if p != state.current_user.username), name
+                )
             return name
         return room.name
 
     display_name = _get_display_name()
-    
+
     # Подзаголовок в зависимости от типа чата
     def _get_subtitle() -> str:
         if is_personal:
@@ -835,18 +1557,20 @@ def room_view(page: flet.Page, state: AppState) -> None:
     )
 
     # Create formatting toolbar
-    print(f"[room_view] creating FormattingToolbar...")
+    print("[room_view] creating FormattingToolbar...")
     formatting_toolbar = FormattingToolbar(
         get_value=lambda: message_input.value or "",
-        set_value=lambda v: setattr(message_input, 'value', v),  # No need for page.update()
+        set_value=lambda v: setattr(
+            message_input, "value", v
+        ),  # No need for page.update()
         get_cursor=lambda: None,  # Flet TextField doesn't expose cursor_position
         text_field=message_input,  # Pass TextField reference for selection support
         disabled=False,  # For now, use False since there's no read-only state
     )
-    print(f"[room_view] FormattingToolbar ok")
+    print("[room_view] FormattingToolbar ok")
 
     page.controls.clear()
-    print(f"[room_view] controls cleared, building UI...")
+    print("[room_view] controls cleared, building UI...")
     page.add(
         flet.Column(
             controls=[
@@ -858,6 +1582,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     expand=True,
                     padding=flet.padding.symmetric(horizontal=8, vertical=8),
                 ),
+                _progress_overlay,
                 flet.Container(
                     content=flet.Column(
                         controls=[
@@ -873,12 +1598,12 @@ def room_view(page: flet.Page, state: AppState) -> None:
                                         icon_size=24,
                                     ),
                                     flet.IconButton(
-                                icon=flet.Icons.ATTACH_FILE,
-                                on_click=pick_file,
-                                icon_color="#008069",
-                                tooltip="Attach file",
-                            ),
-                            message_input,
+                                        icon=flet.Icons.ATTACH_FILE,
+                                        on_click=pick_file,
+                                        icon_color="#008069",
+                                        tooltip="Attach file",
+                                    ),
+                                    message_input,
                                     flet.IconButton(
                                         icon=flet.Icons.SEND,
                                         on_click=lambda e: page.run_task(_send_message),
@@ -902,6 +1627,6 @@ def room_view(page: flet.Page, state: AppState) -> None:
         )
     )
     page.update()
-    print(f"[room_view] page.update() done, starting tasks...")
+    print("[room_view] page.update() done, starting tasks...")
     page.run_task(_initial_load)
     page.run_task(_start_ws)

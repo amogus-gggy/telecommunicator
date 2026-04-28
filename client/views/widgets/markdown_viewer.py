@@ -30,6 +30,7 @@ def resolve_shortcodes(text: str) -> str:
     """Replace :shortcode: patterns with Unicode emoji. Unrecognised shortcodes are left unchanged."""
     try:
         import emoji
+
         return emoji.emojize(text, language="alias")
     except Exception:
         return text

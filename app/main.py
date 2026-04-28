@@ -27,6 +27,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Telecommunicator", lifespan=lifespan)
 
 from app.routers import auth as auth_router  # noqa: E402
+from app.routers import backup as backup_router  # noqa: E402
 from app.routers import messages as messages_router  # noqa: E402
 from app.routers import rooms as rooms_router  # noqa: E402
 from app.routers import users as users_router  # noqa: E402
@@ -37,3 +38,4 @@ app.include_router(rooms_router.router)
 app.include_router(messages_router.router)
 app.include_router(users_router.router)
 app.include_router(ws_router.router)
+app.include_router(backup_router.router)

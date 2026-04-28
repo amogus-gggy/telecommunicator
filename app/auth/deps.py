@@ -22,7 +22,7 @@ async def get_current_user(
 
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
-        raw_token = auth_header[len("Bearer "):]
+        raw_token = auth_header[len("Bearer ") :]
     elif token:
         raw_token = token
 

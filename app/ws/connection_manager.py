@@ -27,11 +27,11 @@ class ConnectionManager:
         print(f"[BROADCAST] Room {room_id} has {len(sockets)} connected sockets")
         for i, ws in enumerate(sockets):
             try:
-                print(f"[BROADCAST] Sending to socket {i+1}/{len(sockets)}")
+                print(f"[BROADCAST] Sending to socket {i + 1}/{len(sockets)}")
                 await ws.send_json(payload)
-                print(f"[BROADCAST] Successfully sent to socket {i+1}")
+                print(f"[BROADCAST] Successfully sent to socket {i + 1}")
             except Exception as e:
-                print(f"[BROADCAST] Failed to send to socket {i+1}: {e}")
+                print(f"[BROADCAST] Failed to send to socket {i + 1}: {e}")
                 self._rooms[room_id].discard(ws)
 
     async def send_to_user(self, user_id: int, payload: dict) -> None:

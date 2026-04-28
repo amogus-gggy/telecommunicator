@@ -1,11 +1,22 @@
-from fastapi import APIRouter, Depends, UploadFile, HTTPException, File as FastAPIFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+)
 from fastapi.responses import FileResponse as FastAPIFileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional
 
 from app.auth.deps import get_current_user
 from app.db.deps import get_db
 from app.models.user import User
-from app.schemas.rooms import PermissionUpdate, RoomCreate, RoomResponse, PersonalChatRequest
+from app.schemas.rooms import (
+    PermissionUpdate,
+    RoomCreate,
+    RoomResponse,
+    PersonalChatRequest,
+)
 from app.services import room_service, file_service
 from app.schemas.files import FileResponse
 
@@ -106,11 +117,32 @@ async def list_files(
 @router.post("/{room_id}/files", response_model=FileResponse)
 async def upload_file(
     room_id: int,
-    file: UploadFile = FastAPIFile(...),
+    request: Request,
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await file_service.upload_file(room_id, user, file, db)
+    """Stream-upload a file without multipart buffering.
+
+    Metadata via headers:
+      X-Filename        — original filename (required)
+      X-Key-Blob        — base64 E2EE recipient key blob (optional)
+      X-Key-Sender-Blob — base64 E2EE sender key blob (optional)
+      X-Key-Signature   — base64 Ed25519 signature (optional)
+    """
+    filename = request.headers.get("X-Filename", "").strip()
+    if not filename:
+        raise HTTPException(400, "X-Filename header is required")
+
+    return await file_service.upload_file_stream(
+        room_id=room_id,
+        user=user,
+        filename=filename,
+        stream=request.stream(),
+        db=db,
+        key_blob=request.headers.get("X-Key-Blob") or None,
+        key_sender_blob=request.headers.get("X-Key-Sender-Blob") or None,
+        key_signature=request.headers.get("X-Key-Signature") or None,
+    )
 
 
 @router.get("/{room_id}/files/{file_id}/download")
@@ -126,7 +158,5 @@ async def download_file(
         raise HTTPException(404)
 
     return FastAPIFileResponse(
-        file.path,
-        filename=file.filename,
-        media_type="application/octet-stream"
+        file.path, filename=file.filename, media_type="application/octet-stream"
     )

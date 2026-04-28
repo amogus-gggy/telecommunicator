@@ -25,7 +25,9 @@ async def update_profile(db: AsyncSession, user: User, display_name: str) -> Use
     return user
 
 
-async def change_password(db: AsyncSession, user: User, current_password: str, new_password: str) -> None:
+async def change_password(
+    db: AsyncSession, user: User, current_password: str, new_password: str
+) -> None:
     if not _verify_password(current_password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid current password")
     user.hashed_password = _hash_password(new_password)

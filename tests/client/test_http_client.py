@@ -1,4 +1,5 @@
 """Unit tests for client/api/http_client.py."""
+
 from __future__ import annotations
 
 import json
@@ -34,13 +35,16 @@ def _make_response(status_code: int, body: dict | str | None = None) -> httpx.Re
 
 # _parse_detail tests
 
+
 def test_parse_detail_string():
     r = _make_response(400, {"detail": "something went wrong"})
     assert _parse_detail(r) == "something went wrong"
 
 
 def test_parse_detail_list():
-    r = _make_response(422, {"detail": [{"msg": "field required"}, {"msg": "too short"}]})
+    r = _make_response(
+        422, {"detail": [{"msg": "field required"}, {"msg": "too short"}]}
+    )
     assert _parse_detail(r) == "field required; too short"
 
 
@@ -50,6 +54,7 @@ def test_parse_detail_non_json():
 
 
 # _raise_for_status tests
+
 
 def test_raise_401():
     r = _make_response(401, {"detail": "Token expired"})
@@ -93,6 +98,7 @@ def test_no_raise_on_200():
 
 # APIClient tests
 
+
 class MockTransport(httpx.AsyncBaseTransport):
     def __init__(self, handler):
         self._handler = handler
@@ -109,9 +115,14 @@ async def test_token_attached_in_header():
 
     async def handler(request: httpx.Request) -> httpx.Response:
         captured.append(request)
-        return _make_response(200, {"id": 1, "username": "alice", "email": "a@b.com", "display_name": None})
+        return _make_response(
+            200,
+            {"id": 1, "username": "alice", "email": "a@b.com", "display_name": None},
+        )
 
-    client._client = httpx.AsyncClient(base_url="http://localhost:8000", transport=MockTransport(handler))
+    client._client = httpx.AsyncClient(
+        base_url="http://localhost:8000", transport=MockTransport(handler)
+    )
     await client.get_me()
     assert captured[0].headers.get("authorization") == "Bearer test-jwt-token"
     await client.aclose()
@@ -127,7 +138,9 @@ async def test_no_auth_header_when_no_token():
         captured.append(request)
         return _make_response(200, {"access_token": "tok", "token_type": "bearer"})
 
-    client._client = httpx.AsyncClient(base_url="http://localhost:8000", transport=MockTransport(handler))
+    client._client = httpx.AsyncClient(
+        base_url="http://localhost:8000", transport=MockTransport(handler)
+    )
     await client.login("alice", "password123")
     assert "authorization" not in captured[0].headers
     await client.aclose()
@@ -141,7 +154,9 @@ async def test_login_raises_auth_error_on_401():
     async def handler(request: httpx.Request) -> httpx.Response:
         return _make_response(401, {"detail": "Invalid credentials"})
 
-    client._client = httpx.AsyncClient(base_url="http://localhost:8000", transport=MockTransport(handler))
+    client._client = httpx.AsyncClient(
+        base_url="http://localhost:8000", transport=MockTransport(handler)
+    )
     with pytest.raises(AuthError):
         await client.login("alice", "wrongpass")
     await client.aclose()
@@ -155,9 +170,18 @@ async def test_register_raises_conflict_on_409():
     async def handler(request: httpx.Request) -> httpx.Response:
         return _make_response(409, {"detail": "Username already exists"})
 
-    client._client = httpx.AsyncClient(base_url="http://localhost:8000", transport=MockTransport(handler))
+    client._client = httpx.AsyncClient(
+        base_url="http://localhost:8000", transport=MockTransport(handler)
+    )
     with pytest.raises(ConflictError) as exc_info:
-        await client.register("alice", "a@b.com", "password123")
+        await client.register(
+            "alice",
+            "a@b.com",
+            "password123",
+            "dummy_ed25519_pub_b64",
+            "dummy_x25519_pub_b64",
+            "dummy_encrypted_backup_b64",
+        )
     assert "Username already exists" in exc_info.value.message
     await client.aclose()
 
@@ -165,10 +189,20 @@ async def test_register_raises_conflict_on_409():
 @pytest.mark.asyncio
 async def test_logout_clears_state():
     from client.state import RoomDTO, UserDTO
+
     state = AppState(
         token="tok",
         current_user=UserDTO(id=1, username="alice", email="a@b.com"),
-        active_room=RoomDTO(id=1, name="general", room_type="group", owner_username="alice", member_count=1, is_private=False, allow_member_invite=False, read_only=False),
+        active_room=RoomDTO(
+            id=1,
+            name="general",
+            room_type="group",
+            owner_username="alice",
+            member_count=1,
+            is_private=False,
+            allow_member_invite=False,
+            read_only=False,
+        ),
     )
     client = APIClient(base_url="http://localhost:8000", state=state)
     await client.logout()

@@ -13,6 +13,8 @@ ru:
     error_connect: "Не удалось подключиться к серверу"
     error_server: "Ошибка сервера: %{exc}"
     error_unknown: "Неизвестная ошибка сервера"
+    error_backup_decrypt: "Неверный пароль или повреждённая резервная копия"
+    error_backup_corrupted: "Ошибка расшифровки резервной копии: %{exc}"
 
   register:
     username: "Имя пользователя"
@@ -22,6 +24,7 @@ ru:
     subtitle: "Создать новый аккаунт"
     have_account: "Уже есть аккаунт? Войти"
     error_server: "Ошибка сервера: %{exc}"
+    error_crypto: "Ошибка криптографической инициализации: %{exc}"
 
   profile:
     title: "Профиль"
@@ -126,6 +129,14 @@ ru:
     username_label: "Имя пользователя: %{username}"
     display_name_label: "Отображаемое имя: %{name}"
     close: "Закрыть"
+    encrypted_sent: "🔒 Зашифрованное сообщение"
+    encrypted_no_keys: "🔒 [Зашифрованное сообщение — ключи недоступны]"
+    encrypted_unknown_sender: "🔒 [Зашифрованное сообщение — отправитель неизвестен]"
+    encrypted_malformed: "🔒 [Зашифрованное сообщение — повреждено]"
+    encrypted_bad_signature: "⚠️ [Предупреждение безопасности: подпись сообщения недействительна]"
+    encrypted_bad_key: "🔒 [Ошибка расшифровки: неверный ключ или сообщение изменено]"
+    encrypted_error: "🔒 [Ошибка расшифровки: %{exc}]"
+    send_error: "Не удалось отправить сообщение: %{exc}"
 
   room_settings:
     title: "Настройки комнаты — %{name}"

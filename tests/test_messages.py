@@ -1,4 +1,5 @@
 """Integration tests for the messages layer (Task 8 checkpoint)."""
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,9 +11,30 @@ from app.models.message import Message
 # Helpers
 # ---------------------------------------------------------------------------
 
-async def register_and_login(client: AsyncClient, username: str, email: str, password: str) -> str:
-    await client.post("/auth/register", json={"username": username, "email": email, "password": password})
-    resp = await client.post("/auth/login", json={"username": username, "password": password})
+import base64
+
+_ED25519_PUB_B64 = base64.b64encode(b"\x01" * 32).decode()
+_X25519_PUB_B64 = base64.b64encode(b"\x02" * 32).decode()
+_BACKUP_B64 = base64.b64encode(b"\x03" * 64).decode()
+
+
+async def register_and_login(
+    client: AsyncClient, username: str, email: str, password: str
+) -> str:
+    await client.post(
+        "/auth/register",
+        json={
+            "username": username,
+            "email": email,
+            "password": password,
+            "identity_pub_ed25519": _ED25519_PUB_B64,
+            "identity_pub_x25519": _X25519_PUB_B64,
+            "encrypted_backup": _BACKUP_B64,
+        },
+    )
+    resp = await client.post(
+        "/auth/login", json={"username": username, "password": password}
+    )
     return resp.json()["access_token"]
 
 
@@ -25,7 +47,9 @@ async def create_room_and_get_id(client: AsyncClient, token: str, name: str) -> 
     return resp.json()["id"]
 
 
-async def insert_messages(db: AsyncSession, room_id: int, author_id: int, count: int) -> list[int]:
+async def insert_messages(
+    db: AsyncSession, room_id: int, author_id: int, count: int
+) -> list[int]:
     """Insert `count` messages directly into the DB and return their IDs."""
     ids = []
     for i in range(count):
@@ -46,9 +70,14 @@ async def get_user_id(client: AsyncClient, token: str) -> int:
 # Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
-async def test_member_can_get_message_history_200(client: AsyncClient, test_db: AsyncSession):
-    token = await register_and_login(client, "msg_alice", "msg_alice@example.com", "password123")
+async def test_member_can_get_message_history_200(
+    client: AsyncClient, test_db: AsyncSession
+):
+    token = await register_and_login(
+        client, "msg_alice", "msg_alice@example.com", "password123"
+    )
     room_id = await create_room_and_get_id(client, token, "msg-room-1")
     user_id = await get_user_id(client, token)
 
@@ -61,9 +90,15 @@ async def test_member_can_get_message_history_200(client: AsyncClient, test_db: 
 
 
 @pytest.mark.asyncio
-async def test_non_member_cannot_get_message_history_403(client: AsyncClient, test_db: AsyncSession):
-    owner_token = await register_and_login(client, "msg_bob", "msg_bob@example.com", "password123")
-    outsider_token = await register_and_login(client, "msg_carol", "msg_carol@example.com", "password123")
+async def test_non_member_cannot_get_message_history_403(
+    client: AsyncClient, test_db: AsyncSession
+):
+    owner_token = await register_and_login(
+        client, "msg_bob", "msg_bob@example.com", "password123"
+    )
+    outsider_token = await register_and_login(
+        client, "msg_carol", "msg_carol@example.com", "password123"
+    )
 
     room_id = await create_room_and_get_id(client, owner_token, "msg-room-2")
 
@@ -72,8 +107,12 @@ async def test_non_member_cannot_get_message_history_403(client: AsyncClient, te
 
 
 @pytest.mark.asyncio
-async def test_message_history_before_id_cursor(client: AsyncClient, test_db: AsyncSession):
-    token = await register_and_login(client, "msg_dave", "msg_dave@example.com", "password123")
+async def test_message_history_before_id_cursor(
+    client: AsyncClient, test_db: AsyncSession
+):
+    token = await register_and_login(
+        client, "msg_dave", "msg_dave@example.com", "password123"
+    )
     room_id = await create_room_and_get_id(client, token, "msg-room-3")
     user_id = await get_user_id(client, token)
 
@@ -81,15 +120,21 @@ async def test_message_history_before_id_cursor(client: AsyncClient, test_db: As
     # Use the 6th message ID as cursor — should only return messages with id < that
     cursor_id = ids[5]
 
-    resp = await client.get(f"/rooms/{room_id}/messages?before_id={cursor_id}", headers=auth(token))
+    resp = await client.get(
+        f"/rooms/{room_id}/messages?before_id={cursor_id}", headers=auth(token)
+    )
     assert resp.status_code == 200
     returned_ids = [m["id"] for m in resp.json()]
     assert all(mid < cursor_id for mid in returned_ids)
 
 
 @pytest.mark.asyncio
-async def test_message_history_default_limit_50(client: AsyncClient, test_db: AsyncSession):
-    token = await register_and_login(client, "msg_eve", "msg_eve@example.com", "password123")
+async def test_message_history_default_limit_50(
+    client: AsyncClient, test_db: AsyncSession
+):
+    token = await register_and_login(
+        client, "msg_eve", "msg_eve@example.com", "password123"
+    )
     room_id = await create_room_and_get_id(client, token, "msg-room-4")
     user_id = await get_user_id(client, token)
 
@@ -101,8 +146,12 @@ async def test_message_history_default_limit_50(client: AsyncClient, test_db: As
 
 
 @pytest.mark.asyncio
-async def test_message_history_limit_capped_at_200(client: AsyncClient, test_db: AsyncSession):
-    token = await register_and_login(client, "msg_frank", "msg_frank@example.com", "password123")
+async def test_message_history_limit_capped_at_200(
+    client: AsyncClient, test_db: AsyncSession
+):
+    token = await register_and_login(
+        client, "msg_frank", "msg_frank@example.com", "password123"
+    )
     room_id = await create_room_and_get_id(client, token, "msg-room-5")
     user_id = await get_user_id(client, token)
 

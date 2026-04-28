@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -251,9 +251,7 @@ class TestCacheManager:
 
         # Cache entry exactly 5 minutes old
         timestamp = datetime.now() - timedelta(seconds=300)
-        manager._cache["test_key"] = CacheEntry(
-            data=["old_data"], timestamp=timestamp
-        )
+        manager._cache["test_key"] = CacheEntry(data=["old_data"], timestamp=timestamp)
 
         result = await manager.get("test_key", fetch_fn)
 

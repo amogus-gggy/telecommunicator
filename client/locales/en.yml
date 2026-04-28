@@ -13,6 +13,8 @@ en:
     error_connect: "Cannot connect to server"
     error_server: "Server error: %{exc}"
     error_unknown: "Unknown server error"
+    error_backup_decrypt: "Incorrect password or corrupted backup"
+    error_backup_corrupted: "Backup decryption error: %{exc}"
 
   register:
     username: "Username"
@@ -22,6 +24,7 @@ en:
     subtitle: "Create a new account"
     have_account: "Already have an account? Login"
     error_server: "Server error: %{exc}"
+    error_crypto: "Cryptographic initialization failed: %{exc}"
 
   profile:
     title: "Profile"
@@ -126,6 +129,14 @@ en:
     username_label: "Username: %{username}"
     display_name_label: "Display name: %{name}"
     close: "Close"
+    encrypted_sent: "🔒 Encrypted message"
+    encrypted_no_keys: "🔒 [Encrypted message — keys not available]"
+    encrypted_unknown_sender: "🔒 [Encrypted message — sender unknown]"
+    encrypted_malformed: "🔒 [Encrypted message — malformed]"
+    encrypted_bad_signature: "⚠️ [Security warning: message signature invalid]"
+    encrypted_bad_key: "🔒 [Decryption error: invalid key or tampered message]"
+    encrypted_error: "🔒 [Decryption error: %{exc}]"
+    send_error: "Failed to send message: %{exc}"
 
   room_settings:
     title: "Room Settings — %{name}"
