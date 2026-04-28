@@ -111,6 +111,10 @@ async def send_message(
                 "uploader_id": f.uploader_id,
                 "room_id": f.room_id,
                 "created_at": f.created_at.isoformat(),
+                "is_encrypted": f.is_encrypted,
+                "key_blob": f.key_blob,
+                "key_sender_blob": f.key_sender_blob,
+                "key_signature": f.key_signature,
             }
             for f in message_with_files.files
         ]
@@ -177,14 +181,19 @@ async def get_message_history(
     message_responses = []
     for msg_orm, author_orm in rows_with_details:
         message_files = []
-        if msg_orm.files: # Check if files relationship is loaded and not empty
+        if msg_orm.files:
             message_files = [
                 {
                     "id": f.id,
                     "filename": f.filename,
                     "uploader_id": f.uploader_id,
+                    "uploader_username": author_orm.username,
                     "room_id": f.room_id,
                     "created_at": f.created_at.isoformat(),
+                    "is_encrypted": f.is_encrypted,
+                    "key_blob": f.key_blob,
+                    "key_sender_blob": f.key_sender_blob,
+                    "key_signature": f.key_signature,
                 }
                 for f in msg_orm.files
             ]
@@ -275,7 +284,18 @@ async def send_encrypted_message(
         )
         msg_loaded = msg_with_files.scalar_one()
         files_payload = [
-            {"id": f.id, "filename": f.filename, "room_id": f.room_id, "created_at": f.created_at.isoformat()}
+            {
+                "id": f.id,
+                "filename": f.filename,
+                "room_id": f.room_id,
+                "uploader_id": f.uploader_id,
+                "uploader_username": sender_username,
+                "created_at": f.created_at.isoformat(),
+                "is_encrypted": f.is_encrypted,
+                "key_blob": f.key_blob,
+                "key_sender_blob": f.key_sender_blob,
+                "key_signature": f.key_signature,
+            }
             for f in (msg_loaded.files or [])
         ]
 

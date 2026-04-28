@@ -270,9 +270,13 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
         file_controls = []
 
-        for f in msg.get("files", []):
-            file_id_val = f["id"]
-            file_name_val = f.get("filename", "download")
+        for file_item in msg.get("files", []):
+            file_id_val = file_item["id"]
+            file_name_val = file_item.get("filename", "download")
+            # Attach message author as uploader_username fallback for key lookup
+            if "uploader_username" not in file_item:
+                file_item = dict(file_item)
+                file_item.setdefault("uploader_username", msg.get("author_username"))
 
             async def local_download_task(fid: int, fname: str, file_meta: dict):
                 client = APIClient(base_url=API_URL, state=state)
@@ -399,7 +403,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                                 icon=flet.Icons.DOWNLOAD,
                                 icon_size=18,
                                 tooltip="Download",
-                                on_click=lambda e, fid=file_id_val, fn=file_name_val, fm=f: page.run_task(
+                                on_click=lambda e, fid=file_id_val, fn=file_name_val, fm=file_item: page.run_task(
                                     local_download_task,
                                     fid,
                                     fn,
