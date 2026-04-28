@@ -940,6 +940,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
             try:
                 # Upload files first
                 uploaded_files = []
+                is_personal = room.room_type == "personal"
 
                 for f in attached_files:
                     # On Android f.path is None — use f.bytes instead
@@ -1014,7 +1015,6 @@ def room_view(page: flet.Page, state: AppState) -> None:
                         uploaded_files.append(response.json())
 
                 # Check if this is a personal chat and we should encrypt
-                is_personal = room.room_type == "personal"
                 should_encrypt = False
                 recipient_username = None
                 
