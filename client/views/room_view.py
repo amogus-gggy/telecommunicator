@@ -274,7 +274,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
             file_id_val = f["id"]
             file_name_val = f.get("filename", "download")
 
-            async def local_download_task(fid: int, fname: str):
+            async def local_download_task(fid: int, fname: str, file_meta: dict):
                 client = APIClient(base_url=API_URL, state=state)
                 try:
                     url = f"{API_URL}/rooms/{room.id}/files/{fid}/download"
@@ -284,6 +284,62 @@ def room_view(page: flet.Page, state: AppState) -> None:
                         r = await http.get(url, headers=client._headers())
                         r.raise_for_status()
                         file_bytes = r.content
+
+                    # Decrypt if encrypted
+                    if file_meta.get("is_encrypted"):
+                        try:
+                            import base64
+                            import logging
+                            from crypto.file_crypto import FileDecryptor
+                            from crypto.key_generator import KeyGenerator
+
+                            decryptor = FileDecryptor()
+                            is_own = (
+                                state.current_user is not None
+                                and file_meta.get("uploader_id") == state.current_user.id
+                            )
+
+                            if is_own and file_meta.get("key_sender_blob"):
+                                file_bytes = decryptor.decrypt_own_file(
+                                    ciphertext=file_bytes,
+                                    key_sender_blob_b64=file_meta["key_sender_blob"],
+                                    x25519_priv=state.x25519_private,
+                                )
+                            elif file_meta.get("key_blob") and file_meta.get("key_signature"):
+                                # Need sender public key
+                                sender_keys = None
+                                sender_username = file_meta.get("uploader_username") or file_meta.get("author_username")
+                                if sender_username and state.public_key_cache:
+                                    sender_keys = state.public_key_cache.get_public_keys(sender_username)
+                                if not sender_keys and sender_username:
+                                    _kc = APIClient(base_url=API_URL, state=state)
+                                    try:
+                                        kd = await _kc.get_public_keys(sender_username)
+                                        ed_pub = KeyGenerator.load_ed25519_public_key(base64.b64decode(kd["identity_pub_ed25519"]))
+                                        x_pub = KeyGenerator.load_x25519_public_key(base64.b64decode(kd["identity_pub_x25519"]))
+                                        sender_keys = {"ed25519_pub": ed_pub, "x25519_pub": x_pub}
+                                        if state.public_key_cache:
+                                            state.public_key_cache.set_public_keys(sender_username, ed_pub, x_pub)
+                                    finally:
+                                        await _kc.aclose()
+
+                                if sender_keys:
+                                    file_bytes = decryptor.decrypt_file(
+                                        ciphertext=file_bytes,
+                                        key_blob_b64=file_meta["key_blob"],
+                                        signature_b64=file_meta["key_signature"],
+                                        x25519_priv=state.x25519_private,
+                                        sender_ed25519_pub=sender_keys["ed25519_pub"],
+                                    )
+                        except Exception as dec_exc:
+                            import logging
+                            logging.error(f"[FILE] Decryption failed: {dec_exc}", exc_info=True)
+                            page.snack_bar = flet.SnackBar(
+                                flet.Text(f"Decryption failed: {dec_exc}", color="#fff"),
+                                open=True, bgcolor="#ea4335",
+                            )
+                            page.update()
+                            return
 
                     # save_file on Android/iOS/web requires src_bytes
                     save_path = await file_picker.save_file(
@@ -343,10 +399,11 @@ def room_view(page: flet.Page, state: AppState) -> None:
                                 icon=flet.Icons.DOWNLOAD,
                                 icon_size=18,
                                 tooltip="Download",
-                                on_click=lambda e: page.run_task(
+                                on_click=lambda e, fid=file_id_val, fn=file_name_val, fm=f: page.run_task(
                                     local_download_task,
-                                    file_id_val,
-                                    file_name_val,
+                                    fid,
+                                    fn,
+                                    fm,
                                 ),
                             ),
                         ],
@@ -894,11 +951,64 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     else:
                         continue
 
+                    # Encrypt file for personal E2EE chats
+                    key_blob = None
+                    key_sender_blob = None
+                    key_signature = None
+
+                    if is_personal and state.ed25519_private and state.x25519_private:
+                        parts = room.name.split(", ")
+                        _recipient = next((p for p in parts if p != state.current_user.username), None)
+                        if _recipient:
+                            try:
+                                import base64
+                                from crypto.file_crypto import FileEncryptor
+                                from crypto.key_generator import KeyGenerator
+
+                                r_keys = None
+                                if state.public_key_cache:
+                                    r_keys = state.public_key_cache.get_public_keys(_recipient)
+                                if not r_keys:
+                                    _kc = APIClient(base_url=API_URL, state=state)
+                                    try:
+                                        kd = await _kc.get_public_keys(_recipient)
+                                        r_x25519_pub = KeyGenerator.load_x25519_public_key(base64.b64decode(kd["identity_pub_x25519"]))
+                                        r_ed25519_pub = KeyGenerator.load_ed25519_public_key(base64.b64decode(kd["identity_pub_ed25519"]))
+                                        r_keys = {"x25519_pub": r_x25519_pub, "ed25519_pub": r_ed25519_pub, "user_id": kd.get("user_id", "")}
+                                        if state.public_key_cache:
+                                            state.public_key_cache.set_public_keys(_recipient, r_ed25519_pub, r_x25519_pub, str(kd.get("user_id", "")))
+                                    finally:
+                                        await _kc.aclose()
+
+                                enc = FileEncryptor()
+                                result = enc.encrypt_file(
+                                    plaintext=file_bytes,
+                                    filename=f.name,
+                                    recipient_x25519_pub=r_keys["x25519_pub"],
+                                    sender_ed25519_priv=state.ed25519_private,
+                                    sender_x25519_pub=state.x25519_private.public_key(),
+                                    sender_id=str(state.current_user.id),
+                                    recipient_id=str(r_keys.get("user_id", "")),
+                                )
+                                file_bytes = result["ciphertext"]
+                                key_blob = result["key_blob"]
+                                key_sender_blob = result["key_sender_blob"]
+                                key_signature = result["signature"]
+                            except Exception as enc_exc:
+                                import logging
+                                logging.error(f"[FILE] Encryption failed: {enc_exc}", exc_info=True)
+
                     async with httpx.AsyncClient() as http:
+                        data = {}
+                        if key_blob:
+                            data["key_blob"] = key_blob
+                            data["key_sender_blob"] = key_sender_blob
+                            data["key_signature"] = key_signature
                         response = await http.post(
                             f"{API_URL}/rooms/{room.id}/files",
                             headers=client._headers(),
                             files={"file": (f.name, file_bytes)},
+                            data=data or None,
                         )
                         response.raise_for_status()
                         uploaded_files.append(response.json())

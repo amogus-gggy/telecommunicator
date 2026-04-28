@@ -14,7 +14,15 @@ from app.models.room_member import RoomMember
 UPLOAD_DIR = "uploads"
 
 
-async def upload_file(room_id: int, user, file: UploadFile, db: AsyncSession):
+async def upload_file(
+    room_id: int,
+    user,
+    file: UploadFile,
+    db: AsyncSession,
+    key_blob: str | None = None,
+    key_sender_blob: str | None = None,
+    key_signature: str | None = None,
+):
     try:
         # Validate input
         if file is None:
@@ -57,11 +65,16 @@ async def upload_file(room_id: int, user, file: UploadFile, db: AsyncSession):
             raise HTTPException(500, "Failed to save file")
 
         # ---- Store in DB ----
+        is_encrypted = key_blob is not None
         db_file = File(
             filename=file.filename,
             path=file_path,
             uploader_id=user.id,
-            room_id=room_id
+            room_id=room_id,
+            is_encrypted=is_encrypted,
+            key_blob=key_blob,
+            key_sender_blob=key_sender_blob,
+            key_signature=key_signature,
         )
 
         db.add(db_file)

@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, UploadFile, HTTPException, File as FastAPIFile
+from fastapi import APIRouter, Depends, UploadFile, HTTPException, File as FastAPIFile, Form
 from fastapi.responses import FileResponse as FastAPIFileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional
 
 from app.auth.deps import get_current_user
 from app.db.deps import get_db
@@ -107,10 +108,18 @@ async def list_files(
 async def upload_file(
     room_id: int,
     file: UploadFile = FastAPIFile(...),
+    key_blob: Optional[str] = Form(None),
+    key_sender_blob: Optional[str] = Form(None),
+    key_signature: Optional[str] = Form(None),
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await file_service.upload_file(room_id, user, file, db)
+    return await file_service.upload_file(
+        room_id, user, file, db,
+        key_blob=key_blob,
+        key_sender_blob=key_sender_blob,
+        key_signature=key_signature,
+    )
 
 
 @router.get("/{room_id}/files/{file_id}/download")
