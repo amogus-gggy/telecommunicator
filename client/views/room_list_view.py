@@ -4,7 +4,6 @@ import flet
 
 from api.http_client import APIClient
 from api.ws_client import UnifiedWsClient
-from config import API_URL
 from localization import t
 from state import AppState, RoomDTO
 
@@ -32,7 +31,7 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
     async def _do_create_room(e: flet.ControlEvent) -> None:
         create_error.visible = False
         page.update()
-        client = APIClient(base_url=API_URL, state=state)
+        client = APIClient(state=state)
         try:
             room_data = await client.create_room(
                 name=new_room_name.value or "",
@@ -102,7 +101,7 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
         name_initial = (room.get("name") or "?")[0].upper()
 
         async def on_join(e: flet.ControlEvent, r: dict = room) -> None:
-            client = APIClient(base_url=API_URL, state=state)
+            client = APIClient(state=state)
             try:
                 await client.join_room(r["id"])
                 state.active_room = RoomDTO(
@@ -213,7 +212,7 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
         nonlocal all_rooms
         status_text.value = t("room_list.loading")
         page.update()
-        client = APIClient(base_url=API_URL, state=state)
+        client = APIClient(state=state)
         try:
             public_rooms = await client.list_rooms()
             try:
@@ -243,9 +242,7 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
 
     async def do_logout(e: flet.ControlEvent) -> None:
         _stop_refresh()
-        client = APIClient(base_url=API_URL, state=state)
-        await client.logout()
-        await client.aclose()
+        await state.logout()
         from views.login_view import login_view
 
         login_view(page, state)
@@ -276,7 +273,11 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
         if state.ws is not None:
             state.ws._on_notification = _on_notification
             return
-        nc = UnifiedWsClient(token=state.token or "", on_notification=_on_notification)
+        nc = UnifiedWsClient(
+            token=state.token or "",
+            on_notification=_on_notification,
+            ws_url=state.ws_url,
+        )
         state.ws = nc
         await nc.connect()
 

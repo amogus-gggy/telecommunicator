@@ -3,6 +3,7 @@ en:
     title: "Messenger"
 
   login:
+    server_url: "Server URL"
     username: "Username"
     password: "Password"
     submit: "Login"
@@ -51,6 +52,8 @@ en:
     alignment_left: "All left"
     alignment_right: "All right"
     setting_saved: "Setting saved"
+    server_settings: "Server Settings"
+    server_url: "Server URL"
 
   language:
     title: "Interface language"
