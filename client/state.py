@@ -36,6 +36,8 @@ class RoomDTO:
 
 @dataclass
 class AppState:
+    api_url: str = field(default="")
+    ws_url: str = field(default="")
     token: str | None = None
     current_user: UserDTO | None = None
     active_room: RoomDTO | None = None
@@ -75,6 +77,17 @@ class AppState:
     public_key_cache: "PublicKeyCache | None" = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
+        if not self.api_url or not self.ws_url:
+            try:
+                from config import API_URL, WS_URL
+
+                if not self.api_url:
+                    self.api_url = API_URL
+                if not self.ws_url:
+                    self.ws_url = WS_URL
+            except ImportError:
+                pass
+
         if self.public_key_cache is None:
             try:
                 from crypto.key_cache import PublicKeyCache
@@ -99,6 +112,17 @@ class AppState:
                     self.on_alignment_change(str(value))
         else:
             object.__setattr__(self, name, value)
+
+    async def logout(self) -> None:
+        """Clear session and close all clients."""
+        self.close_ws()
+        from api.http_client import close_shared_clients
+
+        await close_shared_clients()
+        self.token = None
+        self.current_user = None
+        self.active_room = None
+        self.clear_crypto_keys()
 
     def close_room_ws(self) -> None:
         if self.ws is not None:

@@ -3,6 +3,7 @@ ru:
     title: "Мессенджер"
 
   login:
+    server_url: "Адрес сервера"
     username: "Имя пользователя"
     password: "Пароль"
     submit: "Войти"
@@ -51,6 +52,8 @@ ru:
     alignment_left: "Все слева"
     alignment_right: "Все справа"
     setting_saved: "Настройка сохранена"
+    server_settings: "Настройки сервера"
+    server_url: "Адрес сервера"
 
   language:
     title: "Язык интерфейса"

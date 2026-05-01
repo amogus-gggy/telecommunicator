@@ -7,7 +7,6 @@ import flet
 
 from api.http_client import APIClient, AuthError
 from api.ws_client import UnifiedWsClient
-from config import API_URL
 from localization import t
 from state import AppState
 from views.widgets.markdown_viewer import MarkdownViewer, resolve_shortcodes
@@ -249,7 +248,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         _profile_sheet.open = True
         page.update()
 
-        client = APIClient(base_url=API_URL, state=state)
+        client = APIClient(state=state)
         try:
             data = await client.get_user(username)
             dn = data.get("display_name") or ""
@@ -360,9 +359,9 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 from crypto.file_crypto import FileDecryptor
                 from crypto.key_generator import KeyGenerator
 
-                client = APIClient(base_url=API_URL, state=state)
+                client = APIClient(state=state)
                 try:
-                    url = f"{API_URL}/rooms/{room.id}/files/{fid}/download"
+                    url = f"{state.api_url}/rooms/{room.id}/files/{fid}/download"
                     is_encrypted = file_meta.get("is_encrypted")
                     is_own = (
                         state.current_user is not None
@@ -673,7 +672,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
             if not sender_keys:
                 logging.info(f"[DECRYPT] Fetching public keys for {sender_username}")
-                client = APIClient(base_url=API_URL, state=state)
+                client = APIClient(state=state)
                 try:
                     keys_data = await client.get_public_keys(sender_username)
                     ed25519_pub_bytes = base64.b64decode(
@@ -917,7 +916,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         page.update()
 
     async def _load_messages(before_id: int | None = None) -> list[dict]:
-        client = APIClient(base_url=API_URL, state=state)
+        client = APIClient(state=state)
         try:
             return await client.get_messages(room.id, before_id=before_id, limit=50)
         except AuthError:
@@ -946,7 +945,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
         # Auto-join public rooms if not already a member
         if room.room_type == "public":
-            client = APIClient(base_url=API_URL, state=state)
+            client = APIClient(state=state)
             try:
                 updated = await client.join_room(room.id)
                 # Sync member count in case it changed
@@ -1075,7 +1074,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
             # Send message via WebSocket or encrypted API
             print("[SEND] Sending message...")
-            client = APIClient(base_url=API_URL, state=state)
+            client = APIClient(state=state)
 
             try:
                 # Upload files first (streaming — no full file in memory)
@@ -1176,7 +1175,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
                         async with httpx.AsyncClient(timeout=upload_timeout) as http:
                             response = await http.post(
-                                f"{API_URL}/rooms/{room.id}/files",
+                                f"{state.api_url}/rooms/{room.id}/files",
                                 headers=upload_headers,
                                 content=_body_chunks(),
                             )
@@ -1382,6 +1381,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
             token=state.token or "",
             on_room_message=_on_ws_message,
             on_reconnecting=_on_reconnecting,
+            ws_url=state.ws_url,
         )
         ws.set_room(room.id)
         _state["ws_client"] = ws
@@ -1418,7 +1418,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         username = (invite_username_field.value or "").strip()
         if not username:
             return
-        client = APIClient(base_url=API_URL, state=state)
+        client = APIClient(state=state)
         try:
             await client.invite_user(room.id, username)
             invite_dialog.open = False

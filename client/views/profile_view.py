@@ -5,7 +5,6 @@ import sys
 import flet
 
 from api.http_client import APIClient, AuthError, ValidationError
-from config import API_URL
 from localization import t, set_locale, get_locale, AVAILABLE_LOCALES
 from state import AppState
 
@@ -36,7 +35,7 @@ def profile_view(page: flet.Page, state: AppState) -> None:
     async def _save_display_name(e: flet.ControlEvent) -> None:
         display_name_error.visible = False
         page.update()
-        client = APIClient(base_url=API_URL, state=state)
+        client = APIClient(state=state)
         try:
             updated = await client.update_profile(
                 display_name=display_name_field.value or ""
@@ -98,7 +97,7 @@ def profile_view(page: flet.Page, state: AppState) -> None:
     async def _change_password(e: flet.ControlEvent) -> None:
         password_error.visible = False
         page.update()
-        client = APIClient(base_url=API_URL, state=state)
+        client = APIClient(state=state)
         try:
             await client.change_password(
                 current_password=current_password_field.value or "",
@@ -205,6 +204,37 @@ def profile_view(page: flet.Page, state: AppState) -> None:
             bgcolor="#008069",
         )
         page.update()
+
+    # --- Server setting ---
+    server_url_field = flet.TextField(
+        label=t("profile.server_url"),
+        value=state.api_url,
+        expand=True,
+        bgcolor="#ffffff",
+        border_color="#e0e0e0",
+    )
+
+    async def _save_server_url(e: flet.ControlEvent) -> None:
+        new_url = server_url_field.value.rstrip("/")
+        if new_url == state.api_url:
+            return
+
+        state.api_url = new_url
+        if "://" in new_url:
+            proto, rest = new_url.split("://", 1)
+            ws_proto = "ws" if proto == "http" else "wss"
+            state.ws_url = f"{ws_proto}://{rest}/ws"
+        else:
+            state.ws_url = f"ws://{new_url}/ws"
+
+        if state.secure_storage:
+            state.secure_storage.set("settings.api_url", state.api_url)
+            state.secure_storage.set("settings.ws_url", state.ws_url)
+
+        # Logout and redirect to login as switching server kills current session
+        await state.logout()
+        from views.login_view import login_view
+        login_view(page, state)
 
     page.controls.clear()
     page.add(
@@ -421,6 +451,40 @@ def profile_view(page: flet.Page, state: AppState) -> None:
                                             flet.ElevatedButton(
                                                 t("profile.save"),
                                                 on_click=_save_alignment,
+                                                style=flet.ButtonStyle(
+                                                    bgcolor="#008069",
+                                                    color="#ffffff",
+                                                    shape=flet.RoundedRectangleBorder(
+                                                        radius=8
+                                                    ),
+                                                    padding=flet.padding.symmetric(
+                                                        vertical=12, horizontal=24
+                                                    ),
+                                                ),
+                                            ),
+                                        ],
+                                        spacing=12,
+                                    ),
+                                    padding=20,
+                                ),
+                                bgcolor="#ffffff",
+                                elevation=1,
+                            ),
+                            flet.Card(
+                                content=flet.Container(
+                                    content=flet.Column(
+                                        controls=[
+                                            flet.Text(
+                                                t("profile.server_settings"),
+                                                size=16,
+                                                weight=flet.FontWeight.W_600,
+                                                color="#111b21",
+                                            ),
+                                            flet.Divider(height=8),
+                                            flet.Row(controls=[server_url_field]),
+                                            flet.ElevatedButton(
+                                                t("profile.save"),
+                                                on_click=_save_server_url,
                                                 style=flet.ButtonStyle(
                                                     bgcolor="#008069",
                                                     color="#ffffff",

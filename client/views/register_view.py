@@ -3,7 +3,6 @@ from __future__ import annotations
 import flet
 
 from api.http_client import APIClient, ConflictError, ValidationError
-from config import API_URL
 from localization import t
 from state import AppState, UserDTO
 
@@ -71,7 +70,7 @@ def register_view(page: flet.Page, state: AppState) -> None:
         loading.visible = True
         page.update()
 
-        client = APIClient(base_url=API_URL, state=state)
+        client = APIClient(state=state)
         try:
             import asyncio
             import base64

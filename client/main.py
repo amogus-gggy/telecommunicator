@@ -57,7 +57,14 @@ async def main(page: flet.Page) -> None:
         logger.info("[main] settings dir: %s", settings_dir)
 
         storage = LocalStorage(settings_dir)
-        state = AppState(secure_storage=storage)
+        
+        stored_api_url = storage.get("settings.api_url")
+        stored_ws_url = storage.get("settings.ws_url")
+        state = AppState(
+            secure_storage=storage,
+            api_url=stored_api_url or "",
+            ws_url=stored_ws_url or "",
+        )
 
         stored_locale = storage.get("settings.locale") or "ru"
         set_locale(stored_locale)
