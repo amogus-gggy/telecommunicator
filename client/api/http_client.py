@@ -124,8 +124,8 @@ class APIClient:
     def __init__(
         self, base_url: str | None = None, state: AppState | None = None
     ) -> None:
-        self.base_url = (base_url or API_URL).rstrip("/")
         self.state = state or AppState()
+        self.base_url = (base_url or self.state.api_url or API_URL).rstrip("/")
         self._client = _get_shared_http_client(self.base_url)
         # Cache the last-seen token so we only rebuild the header dict when it changes
         self._cached_token: str | None = None

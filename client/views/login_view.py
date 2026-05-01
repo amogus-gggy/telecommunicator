@@ -4,7 +4,6 @@ import flet
 import httpx
 
 from api.http_client import APIClient, AuthError
-from config import API_URL
 from localization import t
 from state import AppState, UserDTO
 
@@ -13,6 +12,13 @@ def login_view(page: flet.Page, state: AppState) -> None:
     page.bgcolor = "#f0f2f5"
     page.overlay.clear()
 
+    server_url_field = flet.TextField(
+        label=t("login.server_url"),
+        value=state.api_url,
+        bgcolor="#ffffff",
+        border_color="#e0e0e0",
+        color="#111b21",
+    )
     username_field = flet.TextField(
         label=t("login.username"),
         autofocus=True,
@@ -47,7 +53,27 @@ def login_view(page: flet.Page, state: AppState) -> None:
         loading.visible = True
         page.update()
 
-        client = APIClient(base_url=API_URL, state=state)
+        # Update API URLs if changed
+        new_api_url = server_url_field.value.rstrip("/")
+        if new_api_url != state.api_url:
+            state.api_url = new_api_url
+            # Derive WS URL: replace http with ws, keep host:port, append /ws
+            if "://" in new_api_url:
+                proto, rest = new_api_url.split("://", 1)
+                ws_proto = "ws" if proto == "http" else "wss"
+                state.ws_url = f"{ws_proto}://{rest}/ws"
+            else:
+                state.ws_url = f"ws://{new_api_url}/ws"
+            
+            if state.secure_storage:
+                state.secure_storage.set("settings.api_url", state.api_url)
+                state.secure_storage.set("settings.ws_url", state.ws_url)
+
+            # Close existing clients to pick up new URL
+            from api.http_client import close_shared_clients
+            await close_shared_clients()
+
+        client = APIClient(state=state)
         try:
             token_data = await client.login(
                 username_field.value or "", password_field.value or ""
@@ -139,9 +165,7 @@ def login_view(page: flet.Page, state: AppState) -> None:
         register_view(page, state)
 
     async def do_logout(e: flet.ControlEvent) -> None:
-        client = APIClient(base_url=API_URL, state=state)
-        await client.logout()
-        await client.aclose()
+        await state.logout()
         login_view(page, state)
 
     logout_btn = flet.TextButton(
@@ -171,6 +195,7 @@ def login_view(page: flet.Page, state: AppState) -> None:
                                     t("login.subtitle"), size=14, color="#667781"
                                 ),
                                 flet.Divider(height=20, color=flet.Colors.TRANSPARENT),
+                                server_url_field,
                                 username_field,
                                 password_field,
                                 error_text,

@@ -6,7 +6,6 @@ import flet
 from api.http_client import APIClient
 from api.ws_client import UnifiedWsClient
 from cache.cache_manager import CacheManager
-from config import API_URL
 from localization import t
 from state import AppState, RoomDTO
 
@@ -91,7 +90,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
     async def _create_personal_chat(e: flet.ControlEvent) -> None:
         personal_error.visible = False
         page.update()
-        client = APIClient(base_url=API_URL, state=state)
+        client = APIClient(state=state)
         try:
             room_data = await client.create_personal_chat(username_field.value or "")
             state.active_room = RoomDTO(
@@ -143,7 +142,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
     async def _create_group_chat(e: flet.ControlEvent) -> None:
         group_error.visible = False
         page.update()
-        client = APIClient(base_url=API_URL, state=state)
+        client = APIClient(state=state)
         try:
             room_type = "public" if public_toggle.value else "group"
             room_data = await client.create_room(
@@ -430,7 +429,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
         status_text.value = t("chat_list.loading")
         page.update()
 
-        client = APIClient(base_url=API_URL, state=state)
+        client = APIClient(state=state)
         try:
 
             async def fetch_my_chats():
@@ -457,9 +456,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
 
     async def do_logout(e: flet.ControlEvent) -> None:
         _stop_refresh()
-        client = APIClient(base_url=API_URL, state=state)
-        await client.logout()
-        await client.aclose()
+        await state.logout()
         from views.login_view import login_view
 
         login_view(page, state)
@@ -512,12 +509,16 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             # Update the notification callback on the existing connection
             state.ws._on_notification = _on_notification
             return
-        nc = UnifiedWsClient(token=state.token or "", on_notification=_on_notification)
+        nc = UnifiedWsClient(
+            token=state.token or "",
+            on_notification=_on_notification,
+            ws_url=state.ws_url,
+        )
         state.ws = nc
         await nc.connect()
 
     def _start_background_refresh() -> None:
-        client = APIClient(base_url=API_URL, state=state)
+        client = APIClient(state=state)
 
         async def fetch_my_chats():
             return await client.get_my_rooms()
