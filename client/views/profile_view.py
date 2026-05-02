@@ -232,7 +232,7 @@ def profile_view(page: flet.Page, state: AppState) -> None:
             state.secure_storage.set("settings.ws_url", state.ws_url)
 
         # Logout and redirect to login as switching server kills current session
-        await state.logout()
+        await state.logout(clear_credentials=True)
         from views.login_view import login_view
         login_view(page, state)
 

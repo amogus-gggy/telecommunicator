@@ -6,6 +6,7 @@ import httpx
 from api.http_client import APIClient, AuthError
 from localization import t
 from state import AppState, UserDTO
+from storage.credentials import CredentialsStorage
 
 
 def login_view(page: flet.Page, state: AppState) -> None:
@@ -47,7 +48,19 @@ def login_view(page: flet.Page, state: AppState) -> None:
     )
     loading = flet.ProgressRing(visible=False, width=20, height=20, color="#008069")
 
-    async def do_login(e: flet.ControlEvent) -> None:
+    # Auto-login checkbox
+    auto_login_checkbox = flet.Checkbox(
+        label=t("login.auto_login"),
+        value=False,
+        visible=True,
+    )
+
+    # Initialize credentials storage
+    creds_storage = None
+    if state.secure_storage:
+        creds_storage = CredentialsStorage(state.secure_storage)
+
+    async def do_login(e: flet.ControlEvent | None = None) -> None:
         error_text.visible = False
         submit_btn.disabled = True
         loading.visible = True
@@ -121,6 +134,15 @@ def login_view(page: flet.Page, state: AppState) -> None:
                     page.update()
                     return
 
+            # Save credentials for auto-login if checkbox is checked
+            if creds_storage and auto_login_checkbox.value:
+                creds_storage.save_credentials(
+                    server_url=state.api_url,
+                    username=username_field.value or "",
+                    password=password_field.value or "",
+                    auto_login=True,
+                )
+
             me = await client.get_me()
             state.current_user = UserDTO(
                 id=me["id"],
@@ -159,13 +181,45 @@ def login_view(page: flet.Page, state: AppState) -> None:
     submit_btn.on_click = do_login
     password_field.on_submit = do_login
 
+    # Try auto-login if credentials exist
+    async def try_auto_login() -> None:
+        if not creds_storage:
+            return
+
+        stored_creds = creds_storage.get_credentials()
+        if not stored_creds or not stored_creds.auto_login_enabled:
+            return
+
+        # Pre-fill the fields
+        server_url_field.value = stored_creds.server_url
+        username_field.value = stored_creds.username
+        auto_login_checkbox.value = True
+
+        # Get stored password
+        stored_password = creds_storage.get_password()
+        if stored_password:
+            password_field.value = stored_password
+            page.update()
+
+            # Trigger auto-login
+            await do_login()
+
+    # Schedule auto-login attempt
+    page.run_task(try_auto_login)
+
     def go_register(e: flet.ControlEvent) -> None:
         from views.register_view import register_view
 
         register_view(page, state)
 
+    def go_deploy(e: flet.ControlEvent) -> None:
+        from views.server_deploy_view import server_deploy_view
+
+        server_deploy_view(page, state)
+
     async def do_logout(e: flet.ControlEvent) -> None:
-        await state.logout()
+        # Clear credentials on explicit logout
+        await state.logout(clear_credentials=True)
         login_view(page, state)
 
     logout_btn = flet.TextButton(
@@ -198,6 +252,7 @@ def login_view(page: flet.Page, state: AppState) -> None:
                                 server_url_field,
                                 username_field,
                                 password_field,
+                                auto_login_checkbox,
                                 error_text,
                                 flet.Row(
                                     controls=[submit_btn, loading],
@@ -208,6 +263,13 @@ def login_view(page: flet.Page, state: AppState) -> None:
                                     t("login.no_account"),
                                     on_click=go_register,
                                     style=flet.ButtonStyle(color="#008069"),
+                                ),
+                                flet.Divider(height=8, color=flet.Colors.TRANSPARENT),
+                                flet.TextButton(
+                                    t("login.deploy_server"),
+                                    icon=flet.Icons.CLOUD_UPLOAD,
+                                    on_click=go_deploy,
+                                    style=flet.ButtonStyle(color="#667781"),
                                 ),
                                 logout_btn,
                             ],

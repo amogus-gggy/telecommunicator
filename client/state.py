@@ -113,8 +113,12 @@ class AppState:
         else:
             object.__setattr__(self, name, value)
 
-    async def logout(self) -> None:
-        """Clear session and close all clients."""
+    async def logout(self, clear_credentials: bool = False) -> None:
+        """Clear session and close all clients.
+
+        Args:
+            clear_credentials: If True, also clear stored auto-login credentials.
+        """
         self.close_ws()
         from api.http_client import close_shared_clients
 
@@ -123,6 +127,15 @@ class AppState:
         self.current_user = None
         self.active_room = None
         self.clear_crypto_keys()
+
+        # Clear credentials if requested
+        if clear_credentials and self.secure_storage:
+            try:
+                from storage.credentials import CredentialsStorage
+                creds_storage = CredentialsStorage(self.secure_storage)
+                creds_storage.clear_credentials()
+            except Exception:
+                pass
 
     def close_room_ws(self) -> None:
         if self.ws is not None:
