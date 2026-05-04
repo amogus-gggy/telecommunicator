@@ -327,6 +327,106 @@ class ServerManager:
         # Restart to apply changes
         return self.restart_server()
 
+    SERVER_ASSET_PATH = Path(__file__).parent.parent / "assets" / "server" / "telecommunicator_server.zip"
+
+    def deploy_from_assets(
+        self,
+        install_dir: str | None = None,
+        port: int = DEFAULT_PORT,
+        config: dict | None = None,
+        progress_callback: Callable[[str], None] | None = None,
+        force_reinstall: bool = False,
+    ) -> bool:
+        """Deploy server using bundled server zip from app assets.
+
+        This is the preferred method for mobile clients that have
+        the server package bundled in the app assets.
+
+        Args:
+            install_dir: Remote installation directory
+            port: Server port
+            config: Server configuration dict
+            progress_callback: Progress callback function
+            force_reinstall: If True, remove existing installation first
+
+        Returns:
+            True if deployment successful
+        """
+        if not self._ssh:
+            raise DeploymentError("Not connected")
+
+        # Find server zip in assets
+        zip_path = self.SERVER_ASSET_PATH
+        if not zip_path.exists():
+            raise DeploymentError(
+                f"Server package not found in assets: {zip_path}"
+            )
+
+        # Remove existing installation if force_reinstall
+        if force_reinstall:
+            if progress_callback:
+                progress_callback("Removing existing installation...")
+            self._ssh.exec_command(
+                f"rm -rf {install_dir or self.DEFAULT_INSTALL_DIR}", sudo=True
+            )
+
+        install_dir = install_dir or self.DEFAULT_INSTALL_DIR
+
+        try:
+            # Step 1: Upload package to remote
+            if progress_callback:
+                progress_callback("Uploading server package...")
+
+            self._ssh.upload_file(str(zip_path), "/tmp/telecommunicator_server.zip")
+
+            # Step 2: Create and run install script
+            if progress_callback:
+                progress_callback("Running installation...")
+
+            max_file_size_mb = (
+                config.get("limits", {}).get("file_upload", {}).get("max_file_size_mb", 100)
+                if config else 100
+            )
+            install_script = INSTALL_SCRIPT.format(
+                install_dir=install_dir,
+                port=port,
+                max_file_size_mb=max_file_size_mb,
+                force_reinstall=str(force_reinstall).lower(),
+            )
+
+            self._ssh.upload_string(
+                install_script, "/tmp/install_telecommunicator.sh", mode=0o755
+            )
+
+            exit_code, stdout, stderr = self._ssh.exec_command(
+                "bash /tmp/install_telecommunicator.sh",
+                sudo=True,
+                timeout=600,
+                progress_callback=progress_callback,
+            )
+
+            if exit_code != 0:
+                raise DeploymentError(f"Installation failed: {stderr[:500]}")
+
+            # Step 3: Start service
+            if progress_callback:
+                progress_callback("Starting server...")
+
+            exit_code, _, _ = self._ssh.exec_command(
+                "systemctl start telecommunicator", sudo=True
+            )
+
+            if progress_callback:
+                progress_callback("Deployment complete!")
+
+            return True
+
+        except DeploymentError:
+            raise
+        except Exception as e:
+            logger.exception("[ServerManager] Asset deployment failed")
+            raise DeploymentError(f"Asset deployment failed: {e}")
+
     def _find_project_root(self) -> str:
         """Find the project root directory."""
         # Start from current file location

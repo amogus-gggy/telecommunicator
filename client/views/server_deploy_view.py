@@ -464,7 +464,7 @@ def server_deploy_view(page: flet.Page, state: AppState) -> None:
                 }
             }
 
-            success = manager.deploy(
+            success = manager.deploy_from_assets(
                 port=int(server_port_field.value or 8000),
                 config=config,
                 progress_callback=lambda m: log(m, "cmd"),
