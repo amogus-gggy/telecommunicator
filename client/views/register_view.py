@@ -20,9 +20,16 @@ def register_view(page: flet.Page, state: AppState) -> None:
     page.bgcolor = "#f0f2f5"
     page.overlay.clear()
 
+    server_url_field = flet.TextField(
+        label=t("login.server_url"),
+        value=state.api_url,
+        autofocus=True,
+        bgcolor="#ffffff",
+        border_color="#e0e0e0",
+        color="#111b21",
+    )
     username_field = flet.TextField(
         label=t("register.username"),
-        autofocus=True,
         bgcolor="#ffffff",
         border_color="#e0e0e0",
         color="#111b21",
@@ -69,6 +76,20 @@ def register_view(page: flet.Page, state: AppState) -> None:
         submit_btn.disabled = True
         loading.visible = True
         page.update()
+
+        # Update API URLs if changed
+        new_api_url = server_url_field.value.rstrip("/")
+        if new_api_url != state.api_url:
+            state.api_url = new_api_url
+            if "://" in new_api_url:
+                proto, rest = new_api_url.split("://", 1)
+                ws_proto = "ws" if proto == "http" else "wss"
+                state.ws_url = f"{ws_proto}://{rest}/ws"
+            else:
+                state.ws_url = f"ws://{new_api_url}/ws"
+            if state.secure_storage:
+                state.secure_storage.set("settings.api_url", state.api_url)
+                state.secure_storage.set("settings.ws_url", state.ws_url)
 
         client = APIClient(state=state)
         try:
@@ -204,6 +225,7 @@ def register_view(page: flet.Page, state: AppState) -> None:
                                     t("register.subtitle"), size=14, color="#667781"
                                 ),
                                 flet.Divider(height=20, color=flet.Colors.TRANSPARENT),
+                                server_url_field,
                                 username_field,
                                 username_error,
                                 email_field,

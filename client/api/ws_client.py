@@ -44,7 +44,7 @@ from typing import Callable
 import websockets
 import websockets.exceptions
 
-from config import WS_URL
+from config import PROTOCOL_VERSION, WS_URL
 
 logger = logging.getLogger(__name__)
 
@@ -62,12 +62,14 @@ class UnifiedWsClient:
         on_notification: Callable[[dict], None] | None = None,
         on_reconnecting: Callable[[float], None] | None = None,
         ws_url: str | None = None,
+        protocol_version: str | None = None,
     ) -> None:
         self._token = token
         self._on_room_message = on_room_message
         self._on_notification = on_notification
         self._on_reconnecting = on_reconnecting
         self._ws_url = ws_url or WS_URL
+        self._protocol_version = protocol_version or PROTOCOL_VERSION
         self._closed = False
         self._ws = None
         # Current room the client is subscribed to (sent as query param on connect)
@@ -81,7 +83,7 @@ class UnifiedWsClient:
         """Connect and loop forever with exponential back-off on failure."""
         delay = self._INITIAL_DELAY
         while not self._closed:
-            url = f"{self._ws_url}?token={self._token}"
+            url = f"{self._ws_url}?token={self._token}&protocol_version={self._protocol_version}"
             if self._room_id is not None:
                 url += f"&room_id={self._room_id}"
             try:
@@ -176,12 +178,14 @@ class WsClient(UnifiedWsClient):
         on_message: Callable[[dict], None],
         on_reconnecting: Callable[[float], None] | None = None,
         ws_url: str | None = None,
+        protocol_version: str | None = None,
     ) -> None:
         super().__init__(
             token=token,
             on_room_message=on_message,
             on_reconnecting=on_reconnecting,
             ws_url=ws_url,
+            protocol_version=protocol_version,
         )
         self.set_room(room_id)
 
@@ -194,9 +198,11 @@ class NotificationClient(UnifiedWsClient):
         token: str,
         on_notification: Callable[[dict], None],
         ws_url: str | None = None,
+        protocol_version: str | None = None,
     ) -> None:
         super().__init__(
             token=token,
             on_notification=on_notification,
             ws_url=ws_url,
+            protocol_version=protocol_version,
         )

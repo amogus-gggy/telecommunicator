@@ -1,0 +1,43 @@
+{
+  "server_name": "My Telecommunicator Server",
+  "server_description": "Private secure messaging server",
+  "allow_file_uploads": true,
+  "allow_voice_messages": true,
+  "allow_video_calls": false,
+  "enable_encryption": true,
+  "enable_backups": true,
+  "upload_dir": "uploads",
+  "max_storage_gb": 10.0,
+  "limits": {
+    "max_users": 0,
+    "max_rooms_per_user": 50,
+    "max_members_per_room": 500,
+    "max_message_length": 10000,
+    "max_messages_per_room": 100000,
+    "file_upload": {
+      "max_file_size_mb": 100,
+      "max_total_storage_mb": 1024,
+      "allowed_extensions": [
+        ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg",
+        ".mp4", ".webm", ".mov", ".avi", ".mkv",
+        ".mp3", ".ogg", ".wav", ".flac",
+        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+        ".txt", ".md", ".json", ".xml", ".csv",
+        ".zip", ".rar", ".7z", ".tar", ".gz",
+        ".py", ".js", ".ts", ".html", ".css", ".sql"
+      ],
+      "blocked_extensions": [
+        ".exe", ".dll", ".bat", ".cmd", ".sh", ".bin"
+      ]
+    }
+  },
+  "security": {
+    "allow_registration": true,
+    "require_email_verification": false,
+    "max_login_attempts": 5,
+    "lockout_duration_minutes": 30,
+    "token_expire_hours": 24,
+    "min_password_length": 8,
+    "require_strong_password": true
+  }
+}

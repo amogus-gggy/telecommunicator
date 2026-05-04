@@ -242,7 +242,7 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
 
     async def do_logout(e: flet.ControlEvent) -> None:
         _stop_refresh()
-        await state.logout()
+        await state.logout(clear_credentials=True)
         from views.login_view import login_view
 
         login_view(page, state)

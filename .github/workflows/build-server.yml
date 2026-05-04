@@ -1,0 +1,32 @@
+name: Build Server Package
+
+on:
+  push:
+    branches:
+      - '**'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build server zip
+      run: |
+        mkdir -p client/assets/server
+        python3 scripts/build_server_package.py client/assets/server/telecommunicator_server.zip
+
+    - name: Commit server package
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add client/assets/server/telecommunicator_server.zip
+        git diff --quiet --cached || git commit -m "Update server package [skip ci]"
+        git push

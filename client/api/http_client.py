@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from config import API_URL
+from config import API_URL, PROTOCOL_VERSION
 from state import AppState
 
 logger = logging.getLogger(__name__)
@@ -135,7 +135,12 @@ class APIClient:
         token = self.state.token
         if token != self._cached_token:
             self._cached_token = token
-            self._cached_headers = {"Authorization": f"Bearer {token}"} if token else {}
+            headers: dict[str, str] = {}
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            # Always include protocol version
+            headers["X-Protocol-Version"] = self.state.protocol_version
+            self._cached_headers = headers
         return self._cached_headers
 
     async def _get(self, path: str, **kwargs: Any) -> httpx.Response:
@@ -198,15 +203,37 @@ class APIClient:
                 "identity_pub_ed25519": identity_pub_ed25519,
                 "identity_pub_x25519": identity_pub_x25519,
                 "encrypted_backup": encrypted_backup,
+                "protocol_version": PROTOCOL_VERSION,
             },
         )
-        return r.json()
+        data = r.json()
+        # Store negotiated version from server response
+        if "agreed_version" in data:
+            self.state.protocol_version = data["agreed_version"]
+        if "server_min_version" in data:
+            self.state.server_min_version = data["server_min_version"]
+        if "server_max_version" in data:
+            self.state.server_max_version = data["server_max_version"]
+        return data
 
     async def login(self, username: str, password: str) -> dict:
         r = await self._post(
-            "/auth/login", json={"username": username, "password": password}
+            "/auth/login",
+            json={
+                "username": username,
+                "password": password,
+                "protocol_version": PROTOCOL_VERSION,
+            },
         )
-        return r.json()
+        data = r.json()
+        # Store negotiated version from server response
+        if "agreed_version" in data:
+            self.state.protocol_version = data["agreed_version"]
+        if "server_min_version" in data:
+            self.state.server_min_version = data["server_min_version"]
+        if "server_max_version" in data:
+            self.state.server_max_version = data["server_max_version"]
+        return data
 
     async def logout(self) -> None:
         self.state.token = None
