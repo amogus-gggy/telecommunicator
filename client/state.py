@@ -45,6 +45,10 @@ class AppState:
     secure_storage: Any = field(default=None, repr=False)
     # Single shared WebSocket connection (room messages + notifications)
     ws: "UnifiedWsClient | None" = field(default=None, repr=False)
+    # Protocol version negotiated with server
+    protocol_version: str = field(default="1.0")
+    server_min_version: str = field(default="1.0")
+    server_max_version: str = field(default="1.0")
 
     # Backwards-compat aliases — point to the same object
     @property

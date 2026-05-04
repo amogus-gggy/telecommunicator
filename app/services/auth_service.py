@@ -82,13 +82,17 @@ async def authenticate_user(db: AsyncSession, username: str, password: str) -> U
 
 
 def create_access_token(
-    user_id: int, username: str, expire_hours: int = ACCESS_TOKEN_EXPIRE_HOURS
+    user_id: int,
+    username: str,
+    protocol_version: str,
+    expire_hours: int = ACCESS_TOKEN_EXPIRE_HOURS,
 ) -> str:
-    """Create a signed JWT access token."""
+    """Create a signed JWT access token with protocol version."""
     expire = datetime.now(timezone.utc) + timedelta(hours=expire_hours)
     payload = {
         "sub": str(user_id),
         "username": username,
+        "protocol_version": protocol_version,
         "exp": expire,
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)

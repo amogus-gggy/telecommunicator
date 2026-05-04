@@ -8,6 +8,7 @@ from app.models.room import Room
 from app.models.room_member import RoomMember
 from app.models.user import User
 from app.schemas.messages import WsInbound
+from app.config import MIN_PROTOCOL_VERSION, PROTOCOL_VERSION
 from app.services.auth_service import decode_token
 from app.services.message_service import send_message
 from app.ws.connection_manager import manager
@@ -29,12 +30,39 @@ async def _get_user_from_token(token: str, db: AsyncSession) -> User | None:
 
 @router.websocket("/ws")
 async def websocket_endpoint(
-    ws: WebSocket, token: str | None = None, room_id: int | None = None
+    ws: WebSocket,
+    token: str | None = None,
+    room_id: int | None = None,
+    protocol_version: str | None = None,
 ) -> None:
     async with AsyncSessionLocal() as db:
         if not token:
             await ws.accept()
             await ws.send_json({"type": "error", "payload": "Not authenticated"})
+            await ws.close(code=1008)
+            return
+
+        # Decode token and check protocol version
+        try:
+            payload = decode_token(token)
+        except Exception:
+            await ws.accept()
+            await ws.send_json({"type": "error", "payload": "Not authenticated"})
+            await ws.close(code=1008)
+            return
+
+        # Check protocol version from token
+        token_version = payload.get("protocol_version")
+        if token_version is None:
+            # Old token without version - accept for backwards compatibility
+            pass
+        elif protocol_version is not None and protocol_version != token_version:
+            # Client sent explicit version that doesn't match token
+            await ws.accept()
+            await ws.send_json({
+                "type": "error",
+                "payload": f"Protocol version mismatch. Token: {token_version}, Client: {protocol_version}",
+            })
             await ws.close(code=1008)
             return
 

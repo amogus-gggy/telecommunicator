@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = Path("server_config.json")
 
+# Protocol versioning for client-server compatibility
+PROTOCOL_VERSION = "1.0"
+MIN_PROTOCOL_VERSION = "1.0"
+
 
 @dataclass
 class FileUploadLimits:
