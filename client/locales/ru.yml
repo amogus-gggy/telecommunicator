@@ -3,8 +3,8 @@ ru:
     title: "Мессенджер"
 
   login:
-    server_url: "Адрес сервера"
     username: "Имя пользователя"
+    username_hint: "username@server"
     password: "Пароль"
     submit: "Войти"
     subtitle: "Войдите в аккаунт"
@@ -14,11 +14,14 @@ ru:
     error_connect: "Не удалось подключиться к серверу"
     error_server: "Ошибка сервера: %{exc}"
     error_unknown: "Неизвестная ошибка сервера"
+    error_handle_format: "Введите имя в формате username@server"
     error_backup_decrypt: "Неверный пароль или повреждённая резервная копия"
     error_backup_corrupted: "Ошибка расшифровки резервной копии: %{exc}"
 
   register:
     username: "Имя пользователя"
+    username_hint: "username@server"
+    error_username_format: "Введите имя в формате username@server"
     email: "Email"
     password: "Пароль"
     submit: "Зарегистрироваться"

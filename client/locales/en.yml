@@ -3,8 +3,8 @@ en:
     title: "Messenger"
 
   login:
-    server_url: "Server URL"
     username: "Username"
+    username_hint: "username@server"
     password: "Password"
     submit: "Login"
     subtitle: "Sign in to your account"
@@ -14,11 +14,14 @@ en:
     error_connect: "Cannot connect to server"
     error_server: "Server error: %{exc}"
     error_unknown: "Unknown server error"
+    error_handle_format: "Enter username in the username@server format"
     error_backup_decrypt: "Incorrect password or corrupted backup"
     error_backup_corrupted: "Backup decryption error: %{exc}"
 
   register:
     username: "Username"
+    username_hint: "username@server"
+    error_username_format: "Enter username in the username@server format"
     email: "Email"
     password: "Password"
     submit: "Register"

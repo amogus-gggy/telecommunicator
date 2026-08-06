@@ -5,6 +5,7 @@ import httpx
 
 from api.http_client import APIClient, AuthError
 from localization import t
+from server_addr import build_api_urls, parse_handle
 from state import AppState, UserDTO
 
 
@@ -12,15 +13,9 @@ def login_view(page: flet.Page, state: AppState) -> None:
     page.bgcolor = "#f0f2f5"
     page.overlay.clear()
 
-    server_url_field = flet.TextField(
-        label=t("login.server_url"),
-        value=state.api_url,
-        bgcolor="#ffffff",
-        border_color="#e0e0e0",
-        color="#111b21",
-    )
     username_field = flet.TextField(
         label=t("login.username"),
+        hint_text=t("login.username_hint"),
         autofocus=True,
         bgcolor="#ffffff",
         border_color="#e0e0e0",
@@ -53,30 +48,42 @@ def login_view(page: flet.Page, state: AppState) -> None:
         loading.visible = True
         page.update()
 
-        # Update API URLs if changed
-        new_api_url = server_url_field.value.rstrip("/")
-        if new_api_url != state.api_url:
-            state.api_url = new_api_url
-            # Derive WS URL: replace http with ws, keep host:port, append /ws
-            if "://" in new_api_url:
-                proto, rest = new_api_url.split("://", 1)
-                ws_proto = "ws" if proto == "http" else "wss"
-                state.ws_url = f"{ws_proto}://{rest}/ws"
-            else:
-                state.ws_url = f"ws://{new_api_url}/ws"
-            
-            if state.secure_storage:
-                state.secure_storage.set("settings.api_url", state.api_url)
-                state.secure_storage.set("settings.ws_url", state.ws_url)
+        handle = username_field.value or ""
+        username, server = parse_handle(handle)
+        if "@" in handle and not server:
+            error_text.value = t("login.error_handle_format")
+            error_text.visible = True
+            submit_btn.disabled = False
+            loading.visible = False
+            page.update()
+            return
 
-            # Close existing clients to pick up new URL
-            from api.http_client import close_shared_clients
-            await close_shared_clients()
+        # Update API URLs if the server was specified in the handle
+        if server:
+            try:
+                new_api_url, new_ws_url = build_api_urls(server)
+            except ValueError:
+                error_text.value = t("login.error_handle_format")
+                error_text.visible = True
+                submit_btn.disabled = False
+                loading.visible = False
+                page.update()
+                return
+            if new_api_url != state.api_url:
+                state.api_url = new_api_url
+                state.ws_url = new_ws_url
+                if state.secure_storage:
+                    state.secure_storage.set("settings.api_url", state.api_url)
+                    state.secure_storage.set("settings.ws_url", state.ws_url)
+
+                # Close existing clients to pick up new URL
+                from api.http_client import close_shared_clients
+                await close_shared_clients()
 
         client = APIClient(state=state)
         try:
             token_data = await client.login(
-                username_field.value or "", password_field.value or ""
+                username, password_field.value or ""
             )
             state.token = token_data["access_token"]
 
@@ -195,7 +202,6 @@ def login_view(page: flet.Page, state: AppState) -> None:
                                     t("login.subtitle"), size=14, color="#667781"
                                 ),
                                 flet.Divider(height=20, color=flet.Colors.TRANSPARENT),
-                                server_url_field,
                                 username_field,
                                 password_field,
                                 error_text,

@@ -4,6 +4,7 @@ import flet
 
 from api.http_client import APIClient, ConflictError, ValidationError
 from localization import t
+from server_addr import build_api_urls, parse_handle
 from state import AppState, UserDTO
 
 
@@ -22,6 +23,7 @@ def register_view(page: flet.Page, state: AppState) -> None:
 
     username_field = flet.TextField(
         label=t("register.username"),
+        hint_text=t("register.username_hint"),
         autofocus=True,
         bgcolor="#ffffff",
         border_color="#e0e0e0",
@@ -70,6 +72,37 @@ def register_view(page: flet.Page, state: AppState) -> None:
         loading.visible = True
         page.update()
 
+        handle = username_field.value or ""
+        username, server = parse_handle(handle)
+        if "@" in handle and not server:
+            general_error.value = t("register.error_username_format")
+            general_error.visible = True
+            submit_btn.disabled = False
+            loading.visible = False
+            page.update()
+            return
+
+        # Switch to the server specified in the handle before connecting
+        if server:
+            try:
+                new_api_url, new_ws_url = build_api_urls(server)
+            except ValueError:
+                general_error.value = t("register.error_username_format")
+                general_error.visible = True
+                submit_btn.disabled = False
+                loading.visible = False
+                page.update()
+                return
+            if new_api_url != state.api_url:
+                state.api_url = new_api_url
+                state.ws_url = new_ws_url
+                if state.secure_storage:
+                    state.secure_storage.set("settings.api_url", state.api_url)
+                    state.secure_storage.set("settings.ws_url", state.ws_url)
+
+                from api.http_client import close_shared_clients
+                await close_shared_clients()
+
         client = APIClient(state=state)
         try:
             import asyncio
@@ -106,7 +139,7 @@ def register_view(page: flet.Page, state: AppState) -> None:
 
             logging.info("[Registration] Registering user with server...")
             await client.register(
-                username=username_field.value or "",
+                username=username,
                 email=email_field.value or "",
                 password=password_field.value or "",
                 identity_pub_ed25519=ed25519_pub_b64,
@@ -120,7 +153,7 @@ def register_view(page: flet.Page, state: AppState) -> None:
             logging.info("[Registration] Keys stored in state")
 
             token_data = await client.login(
-                username=username_field.value or "",
+                username=username,
                 password=password_field.value or "",
             )
             state.token = token_data["access_token"]
