@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.deps import get_current_user
 from app.db.deps import get_db
 from app.models.user import User
-from app.schemas.backup import BackupResponse, BackupUpdateRequest
+from app.schemas.backup import MAX_BACKUP_BYTES, BackupResponse, BackupUpdateRequest
 
 router = APIRouter(prefix="/backup", tags=["backup"])
 
@@ -22,6 +22,12 @@ async def update_backup(
         decoded = base64.b64decode(body.encrypted_backup)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid base64 encoding")
+
+    if len(decoded) > MAX_BACKUP_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Backup too large: exceeds {MAX_BACKUP_BYTES} bytes limit",
+        )
 
     current_user.encrypted_backup = decoded
     current_user.backup_version = (current_user.backup_version or 0) + 1
