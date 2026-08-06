@@ -187,6 +187,8 @@ async def leave_room(room_id: int, user: User, db: AsyncSession) -> RoomResponse
     await db.delete(member)
     await db.commit()
 
+    await ws_manager.revoke_access(user.id, room_id)
+
     return await _room_to_response(room, db)
 
 
@@ -278,6 +280,8 @@ async def remove_member(
 
     await db.delete(member)
     await db.commit()
+
+    await ws_manager.revoke_access(target.id, room_id)
 
     return await _room_to_response(room, db)
 

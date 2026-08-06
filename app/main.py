@@ -4,6 +4,10 @@ import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
+from app.services.rate_limit import limiter
 
 
 async def run_migrations() -> None:
@@ -25,6 +29,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Telecommunicator", lifespan=lifespan)
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 from app.routers import auth as auth_router  # noqa: E402
 from app.routers import backup as backup_router  # noqa: E402

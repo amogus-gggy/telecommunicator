@@ -1,6 +1,6 @@
 import base64
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
@@ -17,6 +17,7 @@ from app.services.auth_service import (
     create_access_token,
     register_user,
 )
+from app.services.rate_limit import limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -24,7 +25,12 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post(
     "/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED
 )
-async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/15minutes")
+async def register(
+    request: Request,
+    body: RegisterRequest,
+    db: AsyncSession = Depends(get_db),
+):
     try:
         ed25519_bytes = base64.b64decode(body.identity_pub_ed25519)
         x25519_bytes = base64.b64decode(body.identity_pub_x25519)
@@ -50,7 +56,12 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("20/15minutes")
+async def login(
+    request: Request,
+    body: LoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
     user = await authenticate_user(db, body.username, body.password)
     token = create_access_token(user.id, user.username)
     b64_backup = (

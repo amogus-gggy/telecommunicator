@@ -1,9 +1,15 @@
+import os
+
+os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production")
+
 import pytest
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from httpx import AsyncClient, ASGITransport
-from fastapi import FastAPI
 
 from app.db.base import Base
 from app.db.deps import get_db
@@ -12,6 +18,9 @@ from app.routers import backup as backup_router
 from app.routers import rooms as rooms_router
 from app.routers import messages as messages_router
 from app.routers import users as users_router
+from app.services.rate_limit import limiter
+
+limiter.enabled = False
 
 
 # In-memory SQLite database for testing
@@ -61,6 +70,8 @@ async def client(test_db: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
         yield
 
     test_app = FastAPI(lifespan=noop_lifespan)
+    test_app.state.limiter = limiter
+    test_app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     test_app.include_router(auth_router.router)
     test_app.include_router(rooms_router.router)
     test_app.include_router(messages_router.router)
