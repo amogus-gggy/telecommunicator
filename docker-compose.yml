@@ -1,0 +1,20 @@
+services:
+  api:
+    build: .
+    image: telecommunicator-api
+    container_name: telecommunicator-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required. Copy .env.example to .env and set a strong value.}
+      DATABASE_URL: sqlite+aiosqlite:////data/messenger.db
+    volumes:
+      - db_data:/data
+      - uploads_data:/app/uploads
+    ports:
+      - "8000:8000"
+
+volumes:
+  db_data:
+  uploads_data:
