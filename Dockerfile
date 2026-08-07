@@ -23,4 +23,4 @@ USER app
 EXPOSE 8000
 
 # Alembic migrations run automatically on startup (see app/main.py lifespan).
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

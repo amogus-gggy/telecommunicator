@@ -134,6 +134,7 @@ def login_view(page: flet.Page, state: AppState) -> None:
                 username=me["username"],
                 email=me["email"],
                 display_name=me.get("display_name"),
+                server_name=me.get("server_name") or "",
             )
             from views.chat_list_view import chat_list_view
 

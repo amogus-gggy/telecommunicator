@@ -1085,10 +1085,19 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 e2ee_recipient_keys = None
                 e2ee_recipient_username = None
                 if is_personal and state.ed25519_private and state.x25519_private and state.current_user:
-                    parts = room.name.split(", ")
                     e2ee_recipient_username = next(
-                        (p for p in parts if p != state.current_user.username), None
+                        (
+                            p
+                            for p in room.participants
+                            if p.split("@", 1)[0] != state.current_user.username
+                        ),
+                        None,
                     )
+                    if e2ee_recipient_username is None:
+                        parts = room.name.split(", ")
+                        e2ee_recipient_username = next(
+                            (p for p in parts if p != state.current_user.username), None
+                        )
                     if e2ee_recipient_username:
                         if state.public_key_cache:
                             e2ee_recipient_keys = state.public_key_cache.get_public_keys(e2ee_recipient_username)
@@ -1191,12 +1200,27 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 recipient_username = None
 
                 if is_personal and state.ed25519_private and state.x25519_private:
-                    # Extract recipient username from room name
-                    # Personal chat names are formatted as "user1, user2"
-                    parts = room.name.split(", ")
-                    recipient_username = next(
-                        (p for p in parts if p != state.current_user.username), None
-                    )
+                    # Prefer full member handles so remote participants carry their
+                    # @server part (e.g. "bob@127.0.0.1:8011"); fall back to the
+                    # room name ("user1, user2") for older cached rooms.
+                    counterpart = None
+                    if room.participants:
+                        counterpart = next(
+                            (
+                                p
+                                for p in room.participants
+                                if p.split("@", 1)[0]
+                                != state.current_user.username
+                            ),
+                            None,
+                        )
+                    if counterpart is None:
+                        parts = room.name.split(", ")
+                        counterpart = next(
+                            (p for p in parts if p != state.current_user.username),
+                            None,
+                        )
+                    recipient_username = counterpart or None
 
                     if recipient_username:
                         print(
@@ -1365,18 +1389,28 @@ def room_view(page: flet.Page, state: AppState) -> None:
     state.on_alignment_change = _rebuild_messages
 
     async def _start_ws() -> None:
-        if state.ws is not None:
-            # Reuse existing connection — just update callbacks and room subscription
+        current_room = getattr(state.ws, "_room_id", None) if state.ws else None
+        if state.ws is not None and current_room == room.id:
+            # Same room and socket already subscribed — reuse connection.
             state.ws._on_room_message = _on_ws_message
             state.ws._on_reconnecting = _on_reconnecting
             state.ws.set_room(room.id)
             _state["ws_client"] = state.ws
             logger.debug(
-                "[room_view] Reusing existing WS, switched to room %s", room.id
+                "[room_view] Reusing existing WS, already on room %s", room.id
             )
             return
 
-        # No existing connection — create a new unified client
+        # Closing the existing connection before creating a new one is required:
+        # the server only subscribes a socket to a room from the room_id query
+        # param at connect time, so switching rooms must re-establish the socket.
+        if state.ws is not None:
+            state.ws._on_room_message = None
+            state.ws._on_reconnecting = None
+            state.ws.close()
+            state.ws = None
+
+        # No existing connection (or a different room) — create a new unified client.
         ws = UnifiedWsClient(
             token=state.token or "",
             on_room_message=_on_ws_message,

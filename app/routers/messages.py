@@ -15,7 +15,11 @@ from app.schemas.messages import (
     SendEncryptedMessageRequest,
     SendMessageResponse,
 )
-from app.services.message_service import get_message_history, send_encrypted_message
+from app.services.message_service import (
+    _author_handle,
+    get_message_history,
+    send_encrypted_message,
+)
 
 router = APIRouter(tags=["messages"])
 
@@ -89,11 +93,12 @@ async def get_encrypted_messages(
     for msg, sender in rows:
         # Mark as delivered
         msg.delivered_at = datetime.now(timezone.utc)
+        author_handle = _author_handle(sender)
         responses.append(
             EncryptedMessageResponse(
                 message_id=msg.id,
                 sender_id=sender.id,
-                sender_username=sender.username,
+                sender_username=author_handle,
                 encrypted_blob=base64.b64encode(msg.encrypted_blob).decode()
                 if msg.encrypted_blob
                 else "",

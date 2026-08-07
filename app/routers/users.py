@@ -97,11 +97,10 @@ async def get_user_public_keys(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return the E2EE public keys for a user by username."""
-    result = await db.execute(select(User).where(User.username == username))
-    target = result.scalar_one_or_none()
-    if target is None:
-        raise HTTPException(status_code=404, detail="User not found")
+    """Return the E2EE public keys for a user (supports user@server)."""
+    from app.services.federation_service import resolve_user
+
+    target = await resolve_user(db, username)
     if target.identity_pub_ed25519 is None or target.identity_pub_x25519 is None:
         raise HTTPException(status_code=404, detail="Public keys not found")
     return PublicKeysResponse(
@@ -118,9 +117,8 @@ async def get_user_by_username(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return public profile of any user by username."""
-    result = await db.execute(select(User).where(User.username == username))
-    target = result.scalar_one_or_none()
-    if target is None:
-        raise HTTPException(status_code=404, detail="User not found")
+    """Return public profile of any user (supports username@server)."""
+    from app.services.federation_service import resolve_user
+
+    target = await resolve_user(db, username)
     return target

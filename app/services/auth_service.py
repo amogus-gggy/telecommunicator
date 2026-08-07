@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
+from app.settings import SERVER_NAME
 
 SECRET_KEY: str = os.getenv("SECRET_KEY", "")
 if not SECRET_KEY:
@@ -16,6 +17,10 @@ if not SECRET_KEY:
     )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_HOURS", "24"))
+
+
+def local_server_name() -> str:
+    return SERVER_NAME
 
 
 def _hash_password(password: str) -> str:
@@ -48,7 +53,11 @@ async def register_user(
             status_code=400, detail="identity_pub_x25519 must be exactly 32 bytes"
         )
 
-    result = await db.execute(select(User).where(User.username == username))
+    result = await db.execute(
+        select(User).where(
+            User.username == username, User.server_name == local_server_name()
+        )
+    )
     if result.scalar_one_or_none() is not None:
         raise HTTPException(status_code=409, detail="Username already exists")
 
@@ -75,7 +84,13 @@ async def authenticate_user(db: AsyncSession, username: str, password: str) -> U
     """Authenticate a user. Raises 401 HTTPException on failure (generic message)."""
     from fastapi import HTTPException
 
-    result = await db.execute(select(User).where(User.username == username))
+    result = await db.execute(
+        select(User).where(
+            User.username == username,
+            User.server_name == local_server_name(),
+            User.is_remote == False,  # noqa: E712
+        )
+    )
     user = result.scalar_one_or_none()
 
     if user is None or not _verify_password(password, user.hashed_password):

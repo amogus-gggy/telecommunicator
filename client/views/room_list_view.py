@@ -38,7 +38,7 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
                 is_private=private_toggle.value or False,
             )
             state.active_room = RoomDTO(
-                **{k: room_data[k] for k in RoomDTO.__dataclass_fields__}
+                **{k: room_data.get(k) for k in RoomDTO.__dataclass_fields__}
             )
             create_dialog.open = False
             page.update()

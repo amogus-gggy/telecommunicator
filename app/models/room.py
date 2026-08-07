@@ -1,10 +1,11 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import ForeignKey, String, func
+from sqlalchemy import Boolean, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.settings import SERVER_NAME
 
 
 class RoomType(str, Enum):
@@ -24,3 +25,12 @@ class Room(Base):
     allow_member_invite: Mapped[bool] = mapped_column(default=False)
     read_only: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    # --- Federation fields ---
+    # Name of the server that hosts the canonical copy of this room. For rooms
+    # created locally it equals SERVER_NAME.
+    server_name: Mapped[str] = mapped_column(
+        String(255), nullable=False, default=SERVER_NAME
+    )
+    # PK of the room on its hosting server (None for locally-hosted rooms).
+    remote_room_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

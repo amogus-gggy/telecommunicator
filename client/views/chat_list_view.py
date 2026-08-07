@@ -94,7 +94,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
         try:
             room_data = await client.create_personal_chat(username_field.value or "")
             state.active_room = RoomDTO(
-                **{k: room_data[k] for k in RoomDTO.__dataclass_fields__}
+                **{k: room_data.get(k) for k in RoomDTO.__dataclass_fields__}
             )
             personal_dialog.open = False
             page.update()
@@ -151,7 +151,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
                 is_private=not public_toggle.value,
             )
             state.active_room = RoomDTO(
-                **{k: room_data[k] for k in RoomDTO.__dataclass_fields__}
+                **{k: room_data.get(k) for k in RoomDTO.__dataclass_fields__}
             )
             group_dialog.open = False
             page.update()
