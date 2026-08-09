@@ -69,6 +69,26 @@ class TestCacheChatListIntegration:
         assert fetch_fn.call_count == 1  # Still 1, not fetched again
 
     @pytest.mark.asyncio
+    async def test_force_get_bypasses_fresh_cache(self):
+        """Regression test: explicit refreshes must fetch fresh data even when
+        the cached entry is still within max_age (stale chat list bug)."""
+        manager = CacheManager(max_age=300)
+        fetch_fn = AsyncMock(side_effect=[MY_CHATS, MY_CHATS + GROUP_ROOMS])
+
+        result1 = await manager.get("my_chats", fetch_fn)
+        assert result1 == MY_CHATS
+
+        # Cache entry is fresh (< max_age), but force=True must still refetch
+        result2 = await manager.get("my_chats", fetch_fn, force=True)
+        assert result2 == MY_CHATS + GROUP_ROOMS
+        assert fetch_fn.call_count == 2
+
+        # The forced fetch also refreshed the cache for subsequent normal gets
+        result3 = await manager.get("my_chats", fetch_fn)
+        assert result3 == MY_CHATS + GROUP_ROOMS
+        assert fetch_fn.call_count == 2
+
+    @pytest.mark.asyncio
     async def test_separate_cache_entries_for_my_chats_and_public_rooms(self):
         """Test that personal/group chats and public rooms are cached separately."""
         manager = CacheManager(max_age=300)

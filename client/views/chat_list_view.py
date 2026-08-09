@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+
 import flet
 
 from api.http_client import APIClient
@@ -14,7 +15,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
     page.bgcolor = "#f0f2f5"
     page.overlay.clear()
 
-    cache_manager = CacheManager(refresh_interval=30, max_age=300)
+    cache_manager = CacheManager(refresh_interval=10, max_age=300)
 
     personal_chats: list[dict] = []
     group_chats: list[dict] = []
@@ -283,19 +284,13 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             icon_color = "#667781"
 
         async def on_open(e: flet.ControlEvent, r: dict = room) -> None:
-            print(
-                f"[chat_list] opening room id={r['id']} name={r.get('name')!r} type={r.get('room_type')}"
-            )
             state.active_room = RoomDTO(
                 **{k: r[k] for k in RoomDTO.__dataclass_fields__}
             )
             _stop_refresh()
-            print("[chat_list] refresh stopped, importing room_view...")
             from views.room_view import room_view
 
-            print("[chat_list] calling room_view...")
             room_view(page, state)
-            print("[chat_list] room_view returned")
 
         subtitle_parts = []
         if room_type != "personal":
@@ -424,29 +419,36 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
 
         page.update()
 
-    async def _load_chats() -> None:
+    def _apply_data(my_chats: list[dict], public: list[dict]) -> bool:
+        """Replace list data and re-render only if something changed."""
         nonlocal personal_chats, group_chats, public_rooms
+        new_personal = [r for r in my_chats if r.get("room_type") == "personal"]
+        new_groups = [r for r in my_chats if r.get("room_type") == "group"]
+        if (new_personal, new_groups, public) == (
+            personal_chats,
+            group_chats,
+            public_rooms,
+        ):
+            return False
+        personal_chats, group_chats, public_rooms = new_personal, new_groups, public
+        _invalidate_tile_cache()
+        _filter_chats(search_field.value or "")
+        return True
+
+    async def _load_chats() -> None:
+        # Always fetch fresh data — the cache must not block explicit refreshes
+        # (manual button, WS notifications), otherwise the list goes stale.
         status_text.value = t("chat_list.loading")
         page.update()
 
         client = APIClient(state=state)
         try:
-
-            async def fetch_my_chats():
-                return await client.get_my_rooms()
-
-            async def fetch_public_rooms():
-                return await client.list_rooms()
-
-            my_chats = await cache_manager.get("my_chats", fetch_my_chats)
-            personal_chats = [r for r in my_chats if r.get("room_type") == "personal"]
-            group_chats = [r for r in my_chats if r.get("room_type") == "group"]
-            public_rooms = await cache_manager.get("public_rooms", fetch_public_rooms)
-
-            _invalidate_tile_cache()
-            _filter_chats(search_field.value or "")
-
-            total = len(personal_chats) + len(group_chats) + len(public_rooms)
+            my_chats, public = await asyncio.gather(
+                cache_manager.get("my_chats", client.get_my_rooms, force=True),
+                cache_manager.get("public_rooms", client.list_rooms, force=True),
+            )
+            _apply_data(my_chats, public)
+            total = len(my_chats) + len(public)
             status_text.value = t("chat_list.loaded", total=total)
         except Exception as exc:
             status_text.value = t("chat_list.error_loading", exc=exc)
@@ -467,20 +469,11 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
 
         profile_view(page, state)
 
-    _active = {"running": True}
     state.close_notif_ws()
 
-    async def _auto_refresh() -> None:
-        import asyncio
-
-        while _active["running"]:
-            await asyncio.sleep(10)
-            if not _active["running"]:
-                break
-            await _load_chats()
-
     def _on_notification(payload: dict) -> None:
-        if payload.get("type") == "invite":
+        msg_type = payload.get("type")
+        if msg_type == "invite":
             room_name = payload.get("payload", {}).get("name", "")
             page.snack_bar = flet.SnackBar(
                 flet.Text(t("chat_list.invited", room=room_name), color="#ffffff"),
@@ -489,7 +482,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             )
             page.update()
             page.run_task(_load_chats)
-        elif payload.get("type") == "member_joined":
+        elif msg_type == "member_joined":
             data = payload.get("payload", {})
             username = data.get("username", "")
             room_name = data.get("room_name", "")
@@ -502,6 +495,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
                 bgcolor="#25d366",
             )
             page.update()
+            page.run_task(_load_chats)
 
     async def _start_notifications() -> None:
         # Reuse existing connection if already alive, otherwise create one
@@ -518,36 +512,24 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
         await nc.connect()
 
     def _start_background_refresh() -> None:
-        client = APIClient(state=state)
-
-        async def fetch_my_chats():
-            return await client.get_my_rooms()
-
-        async def fetch_public_rooms():
-            return await client.list_rooms()
-
         def on_my_chats_update(data):
-            nonlocal personal_chats, group_chats
-            personal_chats = [r for r in data if r.get("room_type") == "personal"]
-            group_chats = [r for r in data if r.get("room_type") == "group"]
-            _invalidate_tile_cache()
-            _filter_chats(search_field.value or "")
+            _apply_data(data, public_rooms)
 
         def on_public_rooms_update(data):
-            nonlocal public_rooms
-            public_rooms = data
-            _invalidate_tile_cache()
-            _filter_chats(search_field.value or "")
+            _apply_data(personal_chats + group_chats, data)
 
         cache_manager.start_background_refresh(
-            "my_chats", fetch_my_chats, on_my_chats_update
+            "my_chats",
+            lambda: APIClient(state=state).get_my_rooms(),
+            on_my_chats_update,
         )
         cache_manager.start_background_refresh(
-            "public_rooms", fetch_public_rooms, on_public_rooms_update
+            "public_rooms",
+            lambda: APIClient(state=state).list_rooms(),
+            on_public_rooms_update,
         )
 
     def _stop_refresh() -> None:
-        _active["running"] = False
         cache_manager.stop_background_refresh()
         # Don't close the WS here — room_view will reuse it.
         # Only clear the notification callback so stale notifications are ignored.
@@ -615,6 +597,5 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
     _update_create_buttons()
     page.update()
     page.run_task(_load_chats)
-    page.run_task(_auto_refresh)
     page.run_task(_start_notifications)
     _start_background_refresh()
