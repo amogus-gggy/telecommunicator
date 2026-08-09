@@ -112,7 +112,37 @@ async def _add_room_members(
         )
         if existing.scalar_one_or_none() is None:
             db.add(RoomMember(room_id=room.id, user_id=user.id))
+    # Keep the owner in the roster even if the incoming roster omits them —
+    # an owner who is not a member is a broken state.
+    if room.owner_id:
+        owner_exists = await db.execute(
+            select(RoomMember).where(
+                RoomMember.room_id == room.id, RoomMember.user_id == room.owner_id
+            )
+        )
+        if owner_exists.scalar_one_or_none() is None:
+            db.add(RoomMember(room_id=room.id, user_id=room.owner_id))
     await db.commit()
+
+
+async def _resolve_room_owner(
+    db: AsyncSession, body: fed.FederationRoomImportRequest
+) -> User:
+    """Return a concrete user to own a mirror room.
+
+    The real owner is the host's owner (`body.owner` when provided). Prefer it;
+    otherwise fall back to the first member so `rooms.owner_id` never references
+    a non-existent row (owner_id=0).
+    """
+    owner_member = body.owner
+    if owner_member is None and body.members:
+        owner_member = body.members[0]
+    if owner_member is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Room import requires at least one member (owner)",
+        )
+    return await _member_to_user(db, owner_member)
 
 
 @router.post("/rooms/import", response_model=fed.FederationRoomImportResponse)
@@ -146,10 +176,11 @@ async def federation_room_import(
             local_room_id=existing.id, remote_room_id=body.remote_room_id
         )
 
+    owner_row = await _resolve_room_owner(db, body)
     room = Room(
         name=body.name,
         room_type=body.room_type,
-        owner_id=0,
+        owner_id=owner_row.id,
         is_private=body.is_private,
         server_name=host_server,
         remote_room_id=body.remote_room_id,
@@ -157,19 +188,6 @@ async def federation_room_import(
     db.add(room)
     await db.commit()
     await db.refresh(room)
-
-    # Pick a local owner so room management works even when the real owner is remote.
-    local_owner = None
-    for member in body.members:
-        if member.server_name == SERVER_NAME:
-            local_owner = member
-            break
-
-    _ = await get_local_server(db)  # ensure local row exists for lookups below
-    if local_owner is not None:
-        owner_row = await _member_to_user(db, local_owner)
-        room.owner_id = owner_row.id
-        await db.commit()
 
     await _add_room_members(db, room, body.members)
     return fed.FederationRoomImportResponse(
@@ -183,9 +201,18 @@ async def federation_room_message(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Receive a message relayed into the local room `room_id`."""
+    """Receive a message relayed into the local room `room_id`.
+
+    Authorization:
+    * The body's ``sender.server_name`` must equal the signing server — a relay
+      is only ever produced *by* the author's own homeserver, so any mismatch is
+      a forged author (in particular, it prevents impersonating a local user).
+    * The sender must be a member of the room (mirrors carry the roster, so a
+      legitimately relayed author was imported as a member).
+    * Mirror rooms may only receive relays from their hosting server.
+    """
     raw = await _read_body(request)
-    await verify_request(db, request, raw)
+    sender = await verify_request(db, request, raw)
     try:
         body = fed.FederationRoomMessage.model_validate_json(raw)
     except ValidationError as exc:
@@ -195,9 +222,31 @@ async def federation_room_message(
     if room is None:
         raise HTTPException(status_code=404, detail="Room not found")
 
-    # Room must be a mirror/hosted room for consistency.
-    room_id = room.id
+    # The signing server must be the author's home server — a relay is only ever
+    # produced by the server that hosts the author.
+    if body.sender.server_name != sender.server_name:
+        raise HTTPException(
+            status_code=403, detail="Relay sender does not match author's server"
+        )
+
+    # Only the hosting server may push messages into a mirror room.
+    if room.server_name != SERVER_NAME and sender.server_name != room.server_name:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the hosting server may relay into a mirror room",
+        )
+
     author = await _member_to_user(db, body.sender)
+    membership = await db.execute(
+        select(RoomMember).where(
+            RoomMember.room_id == room.id, RoomMember.user_id == author.id
+        )
+    )
+    if membership.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=403, detail="Author is not a member of this room"
+        )
+
     await message_service.store_and_relay(
         db, room=room, author=author, payload=body.payload
     )

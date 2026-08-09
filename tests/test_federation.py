@@ -7,7 +7,7 @@ endpoints. These tests exercise that routing logic and the inbound endpoint.
 
 import base64
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from httpx import AsyncClient
@@ -88,6 +88,8 @@ async def test_inbound_federation_message_is_stored_and_author_resolved(
             public_key=pub,
         )
     )
+    bob = await cache_remote_user(test_db, "bob", "remote-b", display_name="Bob")
+    test_db.add(RoomMember(room_id=room_id, user_id=bob.id))
     await test_db.commit()
 
     path = f"/federation/rooms/{room_id}/message"
@@ -123,6 +125,188 @@ async def test_inbound_federation_message_is_stored_and_author_resolved(
     assert author.username == "bob"
     assert author.server_name == "remote-b"
     assert author.is_remote is True
+
+
+async def _sign_headers_for_server(
+    server_name: str,
+    path: str,
+    body: dict,
+    private_key,
+) -> dict:
+    raw = json.dumps(body).encode()
+    date = datetime.now(timezone.utc).isoformat()
+    canonical = _signature_canonical("POST", path, date, raw)
+    return {
+        "X-Federation-Server": server_name,
+        "X-Federation-Date": date,
+        "X-Federation-Signature": base64.b64encode(
+            private_key.sign(canonical.encode())
+        ).decode(),
+        "Content-Type": "application/json",
+        "_raw": raw,
+    }
+
+
+@pytest.mark.asyncio
+async def test_inbound_rejects_non_member_author(
+    client: AsyncClient, test_db: AsyncSession
+):
+    token = await register_and_login(
+        client, "alice3", "alice3_fed2@example.com", "password123"
+    )
+    room_id = await create_room_and_get_id(client, token, "inbound-non-member")
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    private = Ed25519PrivateKey.generate()
+    test_db.add(
+        Server(
+            server_name="attacker",
+            base_url="http://attacker:8000",
+            is_local=False,
+            public_key=private.public_key().public_bytes_raw(),
+        )
+    )
+    await test_db.commit()
+
+    path = f"/federation/rooms/{room_id}/message"
+    body = {
+        "sender": {"username": "mallory", "server_name": "attacker"},
+        "payload": {"body": "injected", "is_encrypted": False},
+    }
+    headers = await _sign_headers_for_server("attacker", path, body, private)
+    raw = headers.pop("_raw")
+    resp = await client.post(path, content=raw, headers=headers)
+    assert resp.status_code == 403, resp.text
+
+
+@pytest.mark.asyncio
+async def test_inbound_rejects_local_author_spoofing(
+    client: AsyncClient, test_db: AsyncSession
+):
+    from app.settings import SERVER_NAME
+
+    token = await register_and_login(
+        client, "alice4", "alice4_fed@example.com", "password123"
+    )
+    room_id = await create_room_and_get_id(client, token, "inbound-spoof")
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    private = Ed25519PrivateKey.generate()
+    test_db.add(
+        Server(
+            server_name="attacker2",
+            base_url="http://attacker2:8000",
+            is_local=False,
+            public_key=private.public_key().public_bytes_raw(),
+        )
+    )
+    await test_db.commit()
+
+    # A rogue server claims the message was written by a *local* user.
+    path = f"/federation/rooms/{room_id}/message"
+    body = {
+        "sender": {"username": "alice4", "server_name": SERVER_NAME},
+        "payload": {"body": "forged", "is_encrypted": False},
+    }
+    headers = await _sign_headers_for_server("attacker2", path, body, private)
+    raw = headers.pop("_raw")
+    resp = await client.post(path, content=raw, headers=headers)
+    assert resp.status_code == 403, resp.text
+
+
+@pytest.mark.asyncio
+async def test_inbound_rejects_mirror_relay_from_non_host(
+    client: AsyncClient, test_db: AsyncSession
+):
+    from app.models.room import Room
+    from app.settings import SERVER_NAME
+
+    token = await register_and_login(
+        client, "alice5", "alice5_fed@example.com", "password123"
+    )
+    owner_id = await get_user_id(client, token)
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    private = Ed25519PrivateKey.generate()
+    test_db.add(
+        Server(
+            server_name="attacker3",
+            base_url="http://attacker3:8000",
+            is_local=False,
+            public_key=private.public_key().public_bytes_raw(),
+        )
+    )
+    # A mirror room hosted on remote-host.
+    mirror = Room(
+        name="remote-room",
+        room_type="group",
+        owner_id=owner_id,
+        is_private=True,
+        server_name="remote-host",
+        remote_room_id=42,
+    )
+    test_db.add(mirror)
+    await test_db.commit()
+    await test_db.refresh(mirror)
+
+    path = f"/federation/rooms/{mirror.id}/message"
+    body = {
+        "sender": {"username": "bob", "server_name": "attacker3"},
+        "payload": {"body": "hello", "is_encrypted": False},
+    }
+    headers = await _sign_headers_for_server("attacker3", path, body, private)
+    raw = headers.pop("_raw")
+    resp = await client.post(path, content=raw, headers=headers)
+    assert resp.status_code == 403, resp.text
+
+
+@pytest.mark.asyncio
+async def test_inbound_rejects_stale_timestamp(
+    client: AsyncClient, test_db: AsyncSession
+):
+    token = await register_and_login(
+        client, "alice6", "alice6_fed@example.com", "password123"
+    )
+    room_id = await create_room_and_get_id(client, token, "inbound-stale")
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    private = Ed25519PrivateKey.generate()
+    test_db.add(
+        Server(
+            server_name="remote-stale",
+            base_url="http://remote-stale:8000",
+            is_local=False,
+            public_key=private.public_key().public_bytes_raw(),
+        )
+    )
+    await test_db.commit()
+
+    path = f"/federation/rooms/{room_id}/message"
+    body = {
+        "sender": {"username": "bob", "server_name": "remote-stale"},
+        "payload": {"body": "old", "is_encrypted": False},
+    }
+    # Valid signature, but with a timestamp an hour in the past — a replay.
+    raw = json.dumps(body).encode()
+    date = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    canonical = _signature_canonical("POST", path, date, raw)
+    resp = await client.post(
+        path,
+        content=raw,
+        headers={
+            "X-Federation-Server": "remote-stale",
+            "X-Federation-Date": date,
+            "X-Federation-Signature": base64.b64encode(
+                private.sign(canonical.encode())
+            ).decode(),
+            "Content-Type": "application/json",
+        },
+    )
+    assert resp.status_code == 403, resp.text
 
 
 @pytest.mark.asyncio

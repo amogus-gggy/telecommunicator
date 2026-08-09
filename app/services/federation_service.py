@@ -11,8 +11,9 @@ import base64
 import hashlib
 import json
 import logging
+import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import HTTPException, Request
@@ -26,6 +27,11 @@ from app.settings import SERVER_BASE_URL, SERVER_NAME
 logger = logging.getLogger(__name__)
 
 _FED_DEFAULT_PORT = 8000
+# Max acceptable skew (seconds) between X-Federation-Date and this node's clock.
+# Rejects replays of old signed requests; generous enough for slow peers / clocks.
+_FED_MAX_TIMESTAMP_SKEW_SECONDS = 15 * 60
+# A server identifier may only be a host[:port] — no scheme, path, query, userinfo.
+_SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9._\-]+(?::\d{1,5})?$")
 
 # ---------------------------------------------------------------------------
 # Transport (shared clients per remote base_url, test-transport injectable)
@@ -146,6 +152,26 @@ async def _sign_headers(
     }
 
 
+def _parse_federation_date(date: str) -> datetime:
+    try:
+        dt = datetime.fromisoformat(date.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Invalid federation timestamp")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _is_valid_server_name(name: str) -> bool:
+    """A sender/handle server name must be a bare ``host[:port]``.
+
+    Anything containing a scheme, path, whitespace or other characters would let
+    a remote (or a client-supplied handle) steer this node's HTTP client at an
+    arbitrary URL — blocked here.
+    """
+    return bool(name) and len(name) <= 255 and bool(_SERVER_NAME_RE.match(name))
+
+
 async def verify_request(
     db: AsyncSession, request: Request, body: bytes
 ) -> Server:
@@ -160,6 +186,17 @@ async def verify_request(
     signature = request.headers.get("X-Federation-Signature", "")
     if not sender or not date or not signature:
         raise HTTPException(status_code=403, detail="Missing federation headers")
+    if not _is_valid_server_name(sender):
+        raise HTTPException(status_code=403, detail="Invalid federation server name")
+
+    request_dt = _parse_federation_date(date)
+    if (
+        abs((datetime.now(timezone.utc) - request_dt).total_seconds())
+        > _FED_MAX_TIMESTAMP_SKEW_SECONDS
+    ):
+        raise HTTPException(
+            status_code=403, detail="Federation timestamp too old or in the future"
+        )
 
     result = await db.execute(select(Server).where(Server.server_name == sender))
     server = result.scalar_one_or_none()
@@ -182,15 +219,15 @@ async def verify_request(
 # ---------------------------------------------------------------------------
 
 
-def _default_base_url(server_name: str) -> str:
-    """Guess a base URL for a server name (dev-friendly default).
+def _default_base_url(server_name: str) -> str | None:
+    """Build a base URL for a validated bare ``host[:port]`` server name.
 
-    ``server_name`` may be a bare host ("matrix.example.org"), an explicit
-    host:port ("example.org:8443") or a full URL. The default port is only
-    appended when none is present.
+    Returns ``None`` when ``server_name`` is not a plain host[:port] — a scheme,
+    a path or any other character would otherwise let a remote (or a client
+    handle) redirect this node's HTTP client at an arbitrary URL.
     """
-    if "://" in server_name:
-        return server_name.rstrip("/")
+    if not _is_valid_server_name(server_name):
+        return None
     if ":" in server_name:
         return f"http://{server_name}"
     return f"http://{server_name}:{_FED_DEFAULT_PORT}"
@@ -207,6 +244,8 @@ async def _discover_server(
     Returns ``None`` when the remote cannot be reached or returns no key.
     """
     base_url = _default_base_url(server_name)
+    if base_url is None:
+        return None
     try:
         client = _client_for(base_url)
         response = await client.post(
@@ -220,7 +259,8 @@ async def _discover_server(
         logger.warning("[Federation] Failed to discover %s: %s", server_name, exc)
         return None
 
-    canonical = (info.get("server_name") or server_name).strip()
+    reported = (info.get("server_name") or server_name).strip()
+    canonical = reported if _is_valid_server_name(reported) else server_name
     public_key = None
     try:
         public_key = base64.b64decode(info.get("public_key", ""))
@@ -234,9 +274,13 @@ async def _discover_server(
     if server is not None:
         return server
 
+    reported_base = (info.get("base_url") or "").strip().rstrip("/")
+    if not re.match(r"^https?://[^\s/?#]+(?:/.*)?$", reported_base):
+        reported_base = base_url
+
     server = Server(
         server_name=canonical,
-        base_url=info.get("base_url") or base_url,
+        base_url=reported_base,
         is_local=False,
         public_key=public_key if public_key else None,
     )
