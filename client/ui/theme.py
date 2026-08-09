@@ -191,7 +191,7 @@ def primary_button(text: str, on_click=None, **kwargs) -> flet.ElevatedButton:
             bgcolor=flet.Colors.PRIMARY,
             color=flet.Colors.ON_PRIMARY,
             shape=flet.RoundedRectangleBorder(radius=12),
-            padding=flet.padding.symmetric(vertical=14),
+            padding=flet.padding.symmetric(vertical=14, horizontal=24),
         ),
         **kwargs,
     )

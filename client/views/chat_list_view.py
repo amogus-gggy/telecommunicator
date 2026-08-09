@@ -51,8 +51,6 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
         bgcolor=flet.Colors.SURFACE_CONTAINER_HIGH,
     )
 
-    status_text = flet.Text("", color=flet.Colors.ON_SURFACE_VARIANT, size=12)
-
     tabs = flet.Tabs(
         selected_index=0,
         length=3,
@@ -263,12 +261,22 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
     # --- Отображение чатов ---
     def _get_chat_display_name(room: dict) -> str:
         if room.get("room_type") == "personal":
+            my_username = state.current_user.username if state.current_user else ""
+            # Prefer full member handles so remote users show as "user@server"
+            counterpart = next(
+                (
+                    p
+                    for p in room.get("participants") or []
+                    if p.split("@", 1)[0] != my_username
+                ),
+                None,
+            )
+            if counterpart:
+                return counterpart
             name = room.get("name", "")
-            if state.current_user and state.current_user.username in name:
+            if my_username and my_username in name:
                 parts = name.split(", ")
-                return next(
-                    (p for p in parts if p != state.current_user.username), name
-                )
+                return next((p for p in parts if p != my_username), name)
             return name
         return room.get("name", "")
 
@@ -447,24 +455,15 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
     async def _load_chats() -> None:
         # Always fetch fresh data — the cache must not block explicit refreshes
         # (manual button, WS notifications), otherwise the list goes stale.
-        status_text.value = t("chat_list.loading")
-        page.update()
-
         client = APIClient(state=state)
         try:
             my_chats, public = await asyncio.gather(
                 cache_manager.get("my_chats", client.get_my_rooms, force=True),
                 cache_manager.get("public_rooms", client.list_rooms, force=True),
             )
-
-
-
             _apply_data(my_chats, public)
-            _apply_data(my_chats, public)
-            total = len(my_chats) + len(public)
-            status_text.value = t("chat_list.loaded", total=total)
         except Exception as exc:
-            status_text.value = t("chat_list.error_loading", exc=exc)
+            snack(page, str(exc), ok=False)
         finally:
             page.update()
             await client.aclose()
@@ -583,9 +582,6 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
                 flet.Container(
                     content=flet.Row(controls=[search_field]),
                     padding=flet.padding.symmetric(horizontal=16, vertical=8),
-                ),
-                flet.Container(
-                    content=status_text, padding=flet.padding.symmetric(horizontal=16)
                 ),
                 flet.Container(
                     content=create_buttons,
