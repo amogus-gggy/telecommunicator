@@ -46,6 +46,7 @@ class AppState:
     current_user: UserDTO | None = None
     active_room: RoomDTO | None = None
     message_alignment: str = "default"  # "default" | "left" | "right"
+    theme_mode: str = "system"  # "system" | "light" | "dark"
     secure_storage: Any = field(default=None, repr=False)
     # Single shared WebSocket connection (room messages + notifications)
     ws: "UnifiedWsClient | None" = field(default=None, repr=False)

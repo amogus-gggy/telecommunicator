@@ -7,7 +7,14 @@ import flet
 from api.http_client import APIClient, AuthError, ValidationError
 from localization import t, set_locale, get_locale, AVAILABLE_LOCALES
 from state import AppState
-from ui.theme import initials_avatar, primary_button, snack, surface_app_bar, themed_field
+from ui.theme import (
+    initials_avatar,
+    primary_button,
+    set_theme_mode,
+    snack,
+    surface_app_bar,
+    themed_field,
+)
 
 
 def _section_card(controls: list) -> flet.Container:
@@ -200,6 +207,28 @@ def profile_view(page: flet.Page, state: AppState) -> None:
             state.secure_storage.set("settings.message_alignment", new_val)
         snack(page, t("profile.setting_saved"))
 
+    # --- Theme setting ---
+    theme_options = [
+        ("system", t("theme.system")),
+        ("light", t("theme.light")),
+        ("dark", t("theme.dark")),
+    ]
+    theme_dropdown = _themed_dropdown(
+        value=state.theme_mode,
+        options=[
+            flet.dropdown.Option(key=value, text=label) for value, label in theme_options
+        ],
+        expand=True,
+    )
+
+    def _save_theme(e: flet.ControlEvent) -> None:
+        new_mode = theme_dropdown.value or "system"
+        state.theme_mode = new_mode
+        if state.secure_storage is not None:
+            state.secure_storage.set("settings.theme_mode", new_mode)
+        set_theme_mode(page, new_mode)
+        snack(page, t("profile.setting_saved"))
+
     # --- Server setting ---
     server_url_field = themed_field(
         label=t("profile.server_url"),
@@ -335,6 +364,17 @@ def profile_view(page: flet.Page, state: AppState) -> None:
                                     primary_button(
                                         t("profile.save"),
                                         on_click=_save_alignment,
+                                    ),
+                                ]
+                            ),
+                            _section_card(
+                                [
+                                    _section_title(t("theme.title")),
+                                    _section_divider(),
+                                    theme_dropdown,
+                                    primary_button(
+                                        t("profile.save"),
+                                        on_click=_save_theme,
                                     ),
                                 ]
                             ),

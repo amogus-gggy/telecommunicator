@@ -30,22 +30,6 @@ sys.path.insert(
 
 async def main(page: flet.Page) -> None:
     page.title = "Мессенджер"
-    apply_theme(page)
-
-    # Show a loading indicator immediately so the splash screen dismisses
-    loading = flet.Column(
-        controls=[
-            flet.ProgressRing(color=flet.Colors.PRIMARY),
-            flet.Text(
-                "Загрузка...", color=flet.Colors.ON_SURFACE_VARIANT, size=14
-            ),
-        ],
-        alignment=flet.MainAxisAlignment.CENTER,
-        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
-        expand=True,
-    )
-    page.add(loading)
-    page.update()
 
     try:
         try:
@@ -57,13 +41,33 @@ async def main(page: flet.Page) -> None:
         logger.info("[main] settings dir: %s", settings_dir)
 
         storage = LocalStorage(settings_dir)
-        
+
+        stored_theme = storage.get("settings.theme_mode") or "system"
+        apply_theme(page, stored_theme)
+
+        # Show a loading indicator immediately so the splash screen dismisses
+        page.add(
+            flet.Column(
+                controls=[
+                    flet.ProgressRing(color=flet.Colors.PRIMARY),
+                    flet.Text(
+                        "Загрузка...", color=flet.Colors.ON_SURFACE_VARIANT, size=14
+                    ),
+                ],
+                alignment=flet.MainAxisAlignment.CENTER,
+                horizontal_alignment=flet.CrossAxisAlignment.CENTER,
+                expand=True,
+            )
+        )
+        page.update()
+
         stored_api_url = storage.get("settings.api_url")
         stored_ws_url = storage.get("settings.ws_url")
         state = AppState(
             secure_storage=storage,
             api_url=stored_api_url or "",
             ws_url=stored_ws_url or "",
+            theme_mode=stored_theme,
         )
 
         stored_locale = storage.get("settings.locale") or "ru"

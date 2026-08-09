@@ -63,6 +63,12 @@ ru:
     apply: "Применить"
     restart_note: "Страница будет перезагружена"
 
+  theme:
+    title: "Тема оформления"
+    system: "Как в системе"
+    light: "Светлая"
+    dark: "Тёмная"
+
   chat_list:
     title: "Чаты"
     search: "Поиск чатов"

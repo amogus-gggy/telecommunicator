@@ -126,9 +126,23 @@ def _build_theme(scheme: flet.ColorScheme) -> flet.Theme:
     )
 
 
-def apply_theme(page: flet.Page) -> None:
+def _resolve_theme_mode(theme_mode: str) -> flet.ThemeMode:
+    if theme_mode == "light":
+        return flet.ThemeMode.LIGHT
+    if theme_mode == "dark":
+        return flet.ThemeMode.DARK
+    return flet.ThemeMode.SYSTEM
+
+
+def set_theme_mode(page: flet.Page, theme_mode: str) -> None:
+    """Switch the active theme mode (\"system\" | \"light\" | \"dark\")."""
+    page.theme_mode = _resolve_theme_mode(theme_mode)
+    page.update()
+
+
+def apply_theme(page: flet.Page, theme_mode: str = "system") -> None:
     page.fonts = {FONT_FAMILY: "fonts/RobotoFlex.ttf"}
-    page.theme_mode = flet.ThemeMode.SYSTEM
+    page.theme_mode = _resolve_theme_mode(theme_mode)
     page.theme = _build_theme(light_scheme())
     page.dark_theme = _build_theme(dark_scheme())
     page.padding = 0

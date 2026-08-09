@@ -63,6 +63,12 @@ en:
     apply: "Apply"
     restart_note: "The page will reload"
 
+  theme:
+    title: "Theme"
+    system: "System default"
+    light: "Light"
+    dark: "Dark"
+
   chat_list:
     title: "Chats"
     search: "Search chats"
