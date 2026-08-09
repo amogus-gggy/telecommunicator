@@ -24,6 +24,8 @@ services:
       SERVER_ADDRESS: http://127.0.0.1:8001
       PORT: 8001
       DATABASE_URL: sqlite+aiosqlite:////data/messenger.db
+      # The two instances live on the same loopback host.
+      FED_ALLOW_PRIVATE_NETWORKS: "1"
     volumes:
       - db_data_a:/data
       - uploads_data_a:/app/uploads
@@ -39,6 +41,8 @@ services:
       SERVER_ADDRESS: http://127.0.0.1:8011
       PORT: 8011
       DATABASE_URL: sqlite+aiosqlite:////data/messenger.db
+      # The two instances live on the same loopback host.
+      FED_ALLOW_PRIVATE_NETWORKS: "1"
     volumes:
       - db_data_b:/data
       - uploads_data_b:/app/uploads

@@ -71,3 +71,35 @@ class FederationRoomMessage(BaseModel):
 
 class FederationJoinRequest(BaseModel):
     user: FederationMember
+
+
+class FederationMembershipEvent(BaseModel):
+    """Incremental roster sync — ``add`` or ``remove`` of a single member."""
+
+    event: Literal["add", "remove"]
+    member: FederationMember
+
+
+class FederationPermissionsEvent(BaseModel):
+    """Room settings pushed by the hosting server to a mirror."""
+
+    read_only: bool | None = None
+    allow_member_invite: bool | None = None
+
+
+class FederationHistoryMessage(BaseModel):
+    """One stored room message in a federation history batch."""
+
+    message_id: int
+    sender: FederationMember
+    payload: dict[str, Any]
+
+
+class FederationHistorySyncRequest(BaseModel):
+    """Full history a host pushes to a freshly-created mirror."""
+
+    messages: list[FederationHistoryMessage]
+
+
+class FederationHistoryResponse(BaseModel):
+    messages: list[FederationHistoryMessage]

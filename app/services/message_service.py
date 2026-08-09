@@ -1,4 +1,7 @@
+import asyncio
 import base64
+import logging
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -23,8 +26,18 @@ from app.services.federation_service import (
 )
 from app.ws.connection_manager import manager
 
+logger = logging.getLogger(__name__)
+
 _DEFAULT_PAGE_SIZE = 50
 _MAX_PAGE_SIZE = 200
+
+# Outbound relay retries (seconds: 0.5, 1, 2).
+_RELAY_ATTEMPTS = 3
+_RELAY_BACKOFF_BASE_SECONDS = 0.5
+
+
+def _new_event_id() -> str:
+    return uuid.uuid4().hex
 
 
 def _relay_payload(
@@ -37,8 +50,10 @@ def _relay_payload(
     recipient: User | None = None,
     is_encrypted: bool = False,
     created_at: datetime | None = None,
+    event_id: str | None = None,
 ) -> dict:
     return {
+        "event_id": event_id or _new_event_id(),
         "body": body,
         "is_encrypted": is_encrypted,
         "encrypted_blob": base64.b64encode(encrypted_blob).decode()
@@ -88,6 +103,29 @@ async def _persist_payload_message(
         except Exception:
             return None
 
+    # Idempotency: the same (room, event_id) must never be persisted twice, even
+    # if a retry or a redelivery from the outbox re-sends it.
+    event_id = payload.get("event_id")
+    if event_id:
+        existing = await db.execute(
+            select(Message).where(
+                Message.room_id == room.id, Message.event_id == event_id
+            )
+        )
+        existing_msg = existing.scalar_one_or_none()
+        if existing_msg is not None:
+            return existing_msg
+
+    # Author-created timestamp wins over the mirror's local clock so ordering by
+    # created_at stays consistent across servers.
+    created_at = None
+    raw_created = payload.get("created_at")
+    if isinstance(raw_created, str):
+        try:
+            created_at = datetime.fromisoformat(raw_created.replace("Z", "+00:00"))
+        except ValueError:
+            created_at = None
+
     recipient_row = None
     receiver = payload.get("recipient")
     if receiver:
@@ -108,6 +146,8 @@ async def _persist_payload_message(
         sender_encrypted_blob=_b64(payload.get("sender_encrypted_blob")),
         signature=_b64(payload.get("signature")),
         recipient_id=recipient_row.id if recipient_row else None,
+        event_id=event_id,
+        created_at=created_at or datetime.now(timezone.utc),
     )
     db.add(msg)
     await db.commit()
@@ -180,6 +220,61 @@ async def store_and_relay(
     return msg
 
 
+async def _deliver_to_mirror(
+    db: AsyncSession,
+    room: Room,
+    link,
+    sender_member: dict,
+    payload: dict,
+) -> None:
+    """Deliver a relayed message to one mirror, retrying and queueing failures.
+
+    Transient failures are retried with exponential back-off; if every attempt
+    fails the event is recorded in the durable outbox (``federation_outbox``)
+    for later redelivery instead of being silently swallowed.
+    """
+    from app.services.federation_service import enqueue_outbox_message
+
+    last_error = "unknown federation error"
+    for attempt in range(_RELAY_ATTEMPTS):
+        try:
+            server = await ensure_server(db, link.server_name)
+            await send_room_message(
+                db, server, link.remote_room_id, sender_member, payload
+            )
+            return
+        except HTTPException as exc:
+            last_error = str(exc.detail)
+            if attempt < _RELAY_ATTEMPTS - 1:
+                await asyncio.sleep(_RELAY_BACKOFF_BASE_SECONDS * (2**attempt))
+
+    try:
+        await enqueue_outbox_message(
+            db,
+            room_id=room.id,
+            remote_room_id=link.remote_room_id,
+            server_name=link.server_name,
+            event_id=payload.get("event_id"),
+            sender_member=sender_member,
+            payload=payload,
+            error=last_error,
+        )
+    except Exception as exc:  # Outbox persistence must not mask the failure.
+        logger.error(
+            "[Federation] Failed to queue undelivered relay for %s: %s",
+            link.server_name,
+            exc,
+        )
+    logger.error(
+        "[Federation] Relay of %s to %s (room %s) failed after %d attempts: %s",
+        payload.get("event_id"),
+        link.server_name,
+        link.remote_room_id,
+        _RELAY_ATTEMPTS,
+        last_error,
+    )
+
+
 async def _relay_message(
     db: AsyncSession, room: Room, author: User, payload: dict
 ) -> None:
@@ -197,24 +292,22 @@ async def _relay_message(
         for link in links:
             if link.server_name == author.server_name:
                 continue
-            try:
-                server = await ensure_server(db, link.server_name)
-                await send_room_message(
-                    db, server, link.remote_room_id, sender_member, payload
-                )
-            except HTTPException:
-                continue
+            await _deliver_to_mirror(db, room, link, sender_member, payload)
         return
 
     # Mirror room: forward local author messages to the host.
     if sender_member["server_name"] == SERVER_NAME:
-        try:
-            host = await ensure_server(db, room.server_name)
-            await send_room_message(
-                db, host, room.remote_room_id, sender_member, payload
-            )
-        except HTTPException:
-            pass
+        await _deliver_to_mirror(
+            db,
+            room,
+            RemoteRoomLink(
+                room_id=room.id,
+                server_name=room.server_name,
+                remote_room_id=room.remote_room_id,
+            ),
+            sender_member,
+            payload,
+        )
 
 
 async def send_message(
@@ -260,6 +353,7 @@ async def send_message(
 
     # Persist Message
     msg = Message(room_id=room_id, author_id=author.id, body=body)
+    msg.event_id = _new_event_id()
     db.add(msg)
     await db.commit()
     await db.refresh(msg)  # Refresh to get msg.id
@@ -349,7 +443,10 @@ async def send_message(
     # Federated delivery: fan out to remote mirrors / forward to the host.
     try:
         await _relay_message(
-            db, room, author, _relay_payload(author=author, body=body)
+            db,
+            room,
+            author,
+            _relay_payload(author=author, body=body, event_id=msg.event_id),
         )
     except HTTPException:
         pass  # Single-server operation must not fail because of a remote.
@@ -482,6 +579,7 @@ async def send_encrypted_message(
         recipient_id=recipient.id,
         is_encrypted=True,
     )
+    msg.event_id = _new_event_id()
     db.add(msg)
     await db.commit()
     await db.refresh(msg)
@@ -574,6 +672,7 @@ async def send_encrypted_message(
                 signature=signature,
                 recipient=recipient,
                 is_encrypted=True,
+                event_id=msg.event_id,
             ),
         )
     except Exception:

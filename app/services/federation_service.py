@@ -7,19 +7,25 @@ homeservers over signed federation HTTP endpoints (``/federation/*``).
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
+import ipaddress
 import json
 import logging
+import os
 import re
+import socket
 import uuid
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import HTTPException, Request
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.federation_outbox import FederationOutbox
 from app.models.server import Server
 from app.models.user import User
 from app.settings import SERVER_BASE_URL, SERVER_NAME
@@ -32,6 +38,12 @@ _FED_DEFAULT_PORT = 8000
 _FED_MAX_TIMESTAMP_SKEW_SECONDS = 15 * 60
 # A server identifier may only be a host[:port] — no scheme, path, query, userinfo.
 _SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9._\-]+(?::\d{1,5})?$")
+# Outbound delivery retries with exponential back-off (seconds: 0.5, 1, 2).
+_RELAY_ATTEMPTS = 3
+_RELAY_BACKOFF_BASE_SECONDS = 0.5
+# Remove mark for builds that need to federate between loopback/private hosts
+# (dev/test on a single machine). Dangerous ranges are ALWAYS blocked.
+_SSRF_ALLOW_PRIVATE = os.getenv("FED_ALLOW_PRIVATE_NETWORKS", "0") == "1"
 
 # ---------------------------------------------------------------------------
 # Transport (shared clients per remote base_url, test-transport injectable)
@@ -172,6 +184,83 @@ def _is_valid_server_name(name: str) -> bool:
     return bool(name) and len(name) <= 255 and bool(_SERVER_NAME_RE.match(name))
 
 
+# ---------------------------------------------------------------------------
+# Outbound SSRF guard
+# ---------------------------------------------------------------------------
+
+
+def _ip_is_blocked(ip: ipaddress._BaseAddress) -> bool:
+    """True when an HTTP client must never be pointed at ``ip``.
+
+    Link-local (169.254.0.0/16 — cloud metadata e.g. 169.254.169.254),
+    unspecified and multicast/reserved ranges are always blocked. Loopback and
+    RFC1918 private ranges are blocked by default and only reachable when
+    ``FED_ALLOW_PRIVATE_NETWORKS=1`` (typical for two servers on one machine
+    during development).
+    """
+    if (
+        ip.is_link_local
+        or ip.is_unspecified
+        or ip.is_multicast
+        or ip.is_reserved
+    ):
+        return True
+    if _SSRF_ALLOW_PRIVATE:
+        return False
+    return bool(ip.is_loopback or ip.is_private)
+
+
+def host_looks_blocked(host: str) -> bool:
+    """Block an IP-literal outbound target… without touching the network."""
+    host = host.strip().strip("[]")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return _ip_is_blocked(ip)
+
+
+async def outbound_url_allowed(base_url: str) -> bool:
+    """Validate a federation base URL before a request is made on it.
+
+    Both the literal address and (for hostnames) the DNS resolution are checked;
+    reaching any loopback/link-local/private address aborts the relay. This is
+    what stops a user-supplied ``username@169.254.169.254`` handle from making
+    this node probe metadata services or internal networks.
+    """
+    try:
+        split = urlsplit(base_url)
+    except ValueError:
+        return False
+    host = (split.hostname or "").lower()
+    if split.scheme not in ("http", "https"):
+        return False
+    if not host:
+        return False
+    # Require bare netloc (no embedded userinfo/path/query in the authority).
+    if "@" in split.netloc or "/" in (split.hostname or "") or not split.hostname:
+        return False
+
+    if host_looks_blocked(host):
+        return False
+
+    try:
+        infos = await asyncio.to_thread(socket.getaddrinfo, host, None)
+    except socket.gaierror:
+        # Not resolvable here; the request itself will fail — the injected test
+        # transport never resolves. Nothing dangerous can be reached either way.
+        return True
+
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if _ip_is_blocked(ip):
+            return False
+    return True
+
+
 async def verify_request(
     db: AsyncSession, request: Request, body: bytes
 ) -> Server:
@@ -224,9 +313,14 @@ def _default_base_url(server_name: str) -> str | None:
 
     Returns ``None`` when ``server_name`` is not a plain host[:port] — a scheme,
     a path or any other character would otherwise let a remote (or a client
-    handle) redirect this node's HTTP client at an arbitrary URL.
+    handle) redirect this node's HTTP client at an arbitrary URL. IP-literal
+    addresses in loopback/link-local/private ranges (cloud metadata, internal
+    networks) are rejected outright.
     """
     if not _is_valid_server_name(server_name):
+        return None
+    host = server_name.split(":", 1)[0]
+    if host_looks_blocked(host):
         return None
     if ":" in server_name:
         return f"http://{server_name}"
@@ -245,6 +339,12 @@ async def _discover_server(
     """
     base_url = _default_base_url(server_name)
     if base_url is None:
+        return None
+    # The hello POST is itself the SSRF vector — validate before dialing out.
+    if not await outbound_url_allowed(base_url):
+        logger.warning(
+            "[Federation] Refusing to discover blocked address %s", base_url
+        )
         return None
     try:
         client = _client_for(base_url)
@@ -276,6 +376,10 @@ async def _discover_server(
 
     reported_base = (info.get("base_url") or "").strip().rstrip("/")
     if not re.match(r"^https?://[^\s/?#]+(?:/.*)?$", reported_base):
+        reported_base = base_url
+    # Never register a base_url that would let a remote point this node's HTTP
+    # client at loopback/link-local/private addresses (SSRF via /federation/hello).
+    if not await outbound_url_allowed(reported_base):
         reported_base = base_url
 
     server = Server(
@@ -316,6 +420,11 @@ async def send_to_server(
     body: dict,
 ) -> httpx.Response:
     """Send a signed federation request to ``server`` and raise on HTTP errors."""
+    if not await outbound_url_allowed(server.base_url):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Federation base_url for {server.server_name} is blocked",
+        )
     raw = json.dumps(body).encode()
     headers = await _sign_headers(db, method, path, raw)
     client = _client_for(server.base_url)
@@ -337,6 +446,28 @@ async def send_to_server(
     return response
 
 
+async def _send_with_retry(
+    db: AsyncSession,
+    server: Server,
+    method: str,
+    path: str,
+    body: dict,
+    *,
+    attempts: int = _RELAY_ATTEMPTS,
+) -> httpx.Response:
+    """Send a federated request, retrying transient failures with back-off."""
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return await send_to_server(db, server, method, path, body)
+        except HTTPException as exc:
+            last_exc = exc
+            if attempt < attempts - 1:
+                await asyncio.sleep(_RELAY_BACKOFF_BASE_SECONDS * (2**attempt))
+    assert last_exc is not None
+    raise last_exc
+
+
 async def send_room_message(
     db: AsyncSession,
     server: Server,
@@ -354,6 +485,79 @@ async def send_room_message(
     )
 
 
+async def send_membership_event(
+    db: AsyncSession,
+    server: Server,
+    room_id_on_server: int,
+    event: str,
+    member: dict,
+) -> None:
+    """Tell a mirror to add/remove a single member (incremental roster sync)."""
+    await send_to_server(
+        db,
+        server,
+        "POST",
+        f"/federation/rooms/{room_id_on_server}/membership",
+        {"event": event, "member": member},
+    )
+
+
+async def send_permissions_event(
+    db: AsyncSession,
+    server: Server,
+    room_id_on_server: int,
+    body: dict,
+) -> None:
+    """Push read_only / allow_member_invite settings to a mirror room."""
+    await send_to_server(
+        db,
+        server,
+        "POST",
+        f"/federation/rooms/{room_id_on_server}/permissions",
+        body,
+    )
+
+
+async def send_history_sync(
+    db: AsyncSession,
+    server: Server,
+    room_id_on_server: int,
+    messages: list[dict],
+) -> None:
+    """Bulk-apply the room history into a freshly-created mirror."""
+    await send_to_server(
+        db,
+        server,
+        "POST",
+        f"/federation/rooms/{room_id_on_server}/history",
+        {"messages": messages},
+    )
+
+
+async def fetch_history_from_host(
+    db: AsyncSession,
+    host: Server,
+    room_on_host: int,
+    *,
+    limit: int = 200,
+    before_id: int | None = None,
+) -> list[dict]:
+    """Pull stored messages of ``room_on_host`` from its hosting server.
+
+    Used by a server that just created a mirror to backfill it even when it has
+    no live relay queue. The host authorizes the caller because it holds a
+    mirror link for the room.
+    """
+    query = f"/federation/rooms/{room_on_host}/history?limit={limit}"
+    if before_id is not None:
+        query += f"&before_id={before_id}"
+    response = await _send_with_retry(
+        db, host, "GET", query, {}, attempts=2
+    )
+    info = response.json()
+    return info.get("messages", [])
+
+
 async def import_room_to_server(
     db: AsyncSession, server: Server, body: dict
 ) -> int:
@@ -366,6 +570,84 @@ async def import_room_to_server(
     if not isinstance(link_id, int):
         raise HTTPException(status_code=502, detail="Remote import failed")
     return link_id
+
+
+# ---------------------------------------------------------------------------
+# Outbox: durable queue of undelivered relays (nothing is dropped silently)
+# ---------------------------------------------------------------------------
+
+
+async def enqueue_outbox_message(
+    db: AsyncSession,
+    *,
+    room_id: int,
+    remote_room_id: int,
+    server_name: str,
+    event_id: str | None,
+    sender_member: dict,
+    payload: dict,
+    error: str,
+) -> None:
+    db.add(
+        FederationOutbox(
+            room_id=room_id,
+            remote_room_id=remote_room_id,
+            server_name=server_name,
+            event_id=event_id,
+            sender_member=sender_member,
+            payload=payload,
+            last_error=error,
+        )
+    )
+    await db.commit()
+
+
+async def flush_pending_relays(db: AsyncSession, *, limit: int = 200) -> int:
+    """Re-attempt delivery of queued outbox rows; returns the number delivered."""
+    from app.models.remote_room_link import RemoteRoomLink
+
+    result = await db.execute(
+        select(FederationOutbox).order_by(FederationOutbox.id.asc()).limit(limit)
+    )
+    rows = result.scalars().all()
+    delivered = 0
+    for row in rows:
+        # Drops bookkeeping for a row whose room/link is gone.
+        server = (
+            await db.execute(
+                select(Server).where(Server.server_name == row.server_name)
+            )
+        ).scalar_one_or_none()
+        link = (
+            await db.execute(
+                select(RemoteRoomLink).where(
+                    RemoteRoomLink.room_id == row.room_id,
+                    RemoteRoomLink.server_name == row.server_name,
+                )
+            )
+        ).scalar_one_or_none()
+        if server is None or link is None:
+            await db.delete(row)
+            await db.commit()
+            continue
+        try:
+            await _send_with_retry(
+                db,
+                server,
+                "POST",
+                f"/federation/rooms/{row.remote_room_id}/message",
+                {"sender": row.sender_member, "payload": row.payload},
+                attempts=_RELAY_ATTEMPTS,
+            )
+        except HTTPException as exc:
+            row.attempts += 1
+            row.last_error = str(exc.detail)
+            await db.commit()
+            continue
+        await db.delete(row)
+        await db.commit()
+        delivered += 1
+    return delivered
 
 
 def user_member_payload(user: User) -> dict:
