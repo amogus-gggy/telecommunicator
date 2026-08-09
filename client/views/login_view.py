@@ -7,40 +7,28 @@ from api.http_client import APIClient, AuthError
 from localization import t
 from server_addr import build_api_urls, parse_handle
 from state import AppState, UserDTO
+from ui.theme import initials_avatar, primary_button, themed_field
 
 
 def login_view(page: flet.Page, state: AppState) -> None:
-    page.bgcolor = "#f0f2f5"
+    page.bgcolor = flet.Colors.SURFACE_CONTAINER
     page.overlay.clear()
 
-    username_field = flet.TextField(
+    username_field = themed_field(
         label=t("login.username"),
         hint_text=t("login.username_hint"),
         autofocus=True,
-        bgcolor="#ffffff",
-        border_color="#e0e0e0",
-        color="#111b21",
     )
-    password_field = flet.TextField(
+    password_field = themed_field(
         label=t("login.password"),
         password=True,
         can_reveal_password=True,
-        bgcolor="#ffffff",
-        border_color="#e0e0e0",
-        color="#111b21",
     )
-    error_text = flet.Text("", color="#ea4335", visible=False, size=13)
-    submit_btn = flet.ElevatedButton(
-        t("login.submit"),
-        width=300,
-        style=flet.ButtonStyle(
-            bgcolor="#008069",
-            color="#ffffff",
-            shape=flet.RoundedRectangleBorder(radius=8),
-            padding=flet.padding.symmetric(vertical=16),
-        ),
+    error_text = flet.Text("", color=flet.Colors.ERROR, visible=False, size=13)
+    submit_btn = primary_button(t("login.submit"), expand=True)
+    loading = flet.ProgressRing(
+        visible=False, width=20, height=20, color=flet.Colors.PRIMARY
     )
-    loading = flet.ProgressRing(visible=False, width=20, height=20, color="#008069")
 
     async def do_login(e: flet.ControlEvent) -> None:
         error_text.visible = False
@@ -180,7 +168,7 @@ def login_view(page: flet.Page, state: AppState) -> None:
         t("login.logout"),
         on_click=do_logout,
         visible=state.token is not None,
-        style=flet.ButtonStyle(color="#008069"),
+        style=flet.ButtonStyle(color=flet.Colors.PRIMARY),
     )
 
     page.controls.clear()
@@ -188,45 +176,52 @@ def login_view(page: flet.Page, state: AppState) -> None:
         flet.Column(
             controls=[
                 flet.Container(expand=True),
-                flet.Card(
-                    content=flet.Container(
-                        content=flet.Column(
-                            controls=[
-                                flet.Icon(flet.Icons.CHAT, size=56, color="#008069"),
-                                flet.Text(
-                                    "Telecommunicator",
-                                    size=28,
-                                    weight=flet.FontWeight.BOLD,
-                                    color="#111b21",
-                                ),
-                                flet.Text(
-                                    t("login.subtitle"), size=14, color="#667781"
-                                ),
-                                flet.Divider(height=20, color=flet.Colors.TRANSPARENT),
-                                username_field,
-                                password_field,
-                                error_text,
-                                flet.Row(
-                                    controls=[submit_btn, loading],
-                                    alignment=flet.MainAxisAlignment.CENTER,
-                                    vertical_alignment=flet.CrossAxisAlignment.CENTER,
-                                ),
-                                flet.TextButton(
-                                    t("login.no_account"),
-                                    on_click=go_register,
-                                    style=flet.ButtonStyle(color="#008069"),
-                                ),
-                                logout_btn,
-                            ],
-                            alignment=flet.MainAxisAlignment.CENTER,
-                            horizontal_alignment=flet.CrossAxisAlignment.CENTER,
-                            width=320,
-                            spacing=12,
-                        ),
-                        padding=32,
+                flet.Container(
+                    content=flet.Column(
+                        controls=[
+                            initials_avatar("Telecommunicator", size=72),
+                            flet.Text(
+                                "Telecommunicator",
+                                size=26,
+                                weight=flet.FontWeight.BOLD,
+                                color=flet.Colors.ON_SURFACE,
+                            ),
+                            flet.Text(
+                                t("login.subtitle"),
+                                size=14,
+                                color=flet.Colors.ON_SURFACE_VARIANT,
+                            ),
+                            flet.Divider(height=24, color=flet.Colors.TRANSPARENT),
+                            username_field,
+                            password_field,
+                            error_text,
+                            flet.Row(
+                                controls=[submit_btn, loading],
+                                alignment=flet.MainAxisAlignment.CENTER,
+                                vertical_alignment=flet.CrossAxisAlignment.CENTER,
+                            ),
+                            flet.TextButton(
+                                t("login.no_account"),
+                                on_click=go_register,
+                                style=flet.ButtonStyle(color=flet.Colors.PRIMARY),
+                            ),
+                            logout_btn,
+                        ],
+                        alignment=flet.MainAxisAlignment.CENTER,
+                        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
+                        width=340,
+                        spacing=12,
                     ),
-                    elevation=2,
-                    bgcolor="#ffffff",
+                    padding=32,
+                    border_radius=20,
+                    bgcolor=flet.Colors.SURFACE,
+                    border=flet.border.all(1, flet.Colors.OUTLINE_VARIANT),
+                    shadow=flet.BoxShadow(
+                        blur_radius=24,
+                        spread_radius=-4,
+                        color="#1A000000",
+                        offset=flet.Offset(0, 8),
+                    ),
                 ),
                 flet.Container(expand=True),
             ],

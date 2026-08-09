@@ -7,10 +7,46 @@ import flet
 from api.http_client import APIClient, AuthError, ValidationError
 from localization import t, set_locale, get_locale, AVAILABLE_LOCALES
 from state import AppState
+from ui.theme import initials_avatar, primary_button, snack, surface_app_bar, themed_field
+
+
+def _section_card(controls: list) -> flet.Container:
+    return flet.Container(
+        content=flet.Column(controls=controls, spacing=12),
+        padding=20,
+        bgcolor=flet.Colors.SURFACE,
+        border_radius=16,
+        border=flet.border.all(1, flet.Colors.OUTLINE_VARIANT),
+    )
+
+
+def _section_title(text: str) -> flet.Text:
+    return flet.Text(
+        text, size=16, weight=flet.FontWeight.W_600, color=flet.Colors.ON_SURFACE
+    )
+
+
+def _section_divider() -> flet.Divider:
+    return flet.Divider(height=8, color=flet.Colors.OUTLINE_VARIANT)
+
+
+def _themed_dropdown(**kwargs) -> flet.Dropdown:
+    defaults = dict(
+        filled=True,
+        bgcolor=flet.Colors.SURFACE_CONTAINER_LOW,
+        border_radius=12,
+        border_color=flet.Colors.TRANSPARENT,
+        focused_border_color=flet.Colors.PRIMARY,
+        color=flet.Colors.ON_SURFACE,
+        text_size=15,
+        content_padding=flet.padding.symmetric(horizontal=16, vertical=12),
+    )
+    defaults.update(kwargs)
+    return flet.Dropdown(**defaults)
 
 
 def profile_view(page: flet.Page, state: AppState) -> None:
-    page.bgcolor = "#f0f2f5"
+    page.bgcolor = flet.Colors.SURFACE_CONTAINER
     page.overlay.clear()
     user = state.current_user
 
@@ -20,17 +56,15 @@ def profile_view(page: flet.Page, state: AppState) -> None:
             name=user.display_name or t("profile.display_name_not_set") if user else "",
         ),
         size=14,
-        color="#111b21",
+        color=flet.Colors.ON_SURFACE,
     )
 
-    display_name_field = flet.TextField(
+    display_name_field = themed_field(
         label=t("profile.new_display_name"),
         value=user.display_name or "" if user else "",
         expand=True,
-        bgcolor="#ffffff",
-        border_color="#e0e0e0",
     )
-    display_name_error = flet.Text("", color="#ea4335", visible=False, size=12)
+    display_name_error = flet.Text("", color=flet.Colors.ERROR, visible=False, size=12)
 
     async def _save_display_name(e: flet.ControlEvent) -> None:
         display_name_error.visible = False
@@ -47,52 +81,35 @@ def profile_view(page: flet.Page, state: AppState) -> None:
                 "profile.display_name_label",
                 name=new_dn or t("profile.display_name_not_set"),
             )
-            page.snack_bar = flet.SnackBar(
-                flet.Text(t("profile.display_name_updated"), color="#ffffff"),
-                open=True,
-                bgcolor="#008069",
-            )
-            page.update()
+            snack(page, t("profile.display_name_updated"))
         except ValidationError:
             display_name_error.value = t("profile.display_name_error")
             display_name_error.visible = True
             page.update()
         except AuthError:
             state.token = None
-            page.snack_bar = flet.SnackBar(
-                flet.Text(t("profile.session_expired"), color="#ffffff"),
-                open=True,
-                bgcolor="#ea4335",
-            )
-            page.update()
+            snack(page, t("profile.session_expired"), ok=False)
             from views.login_view import login_view
 
             login_view(page, state)
         except Exception as exc:
-            page.snack_bar = flet.SnackBar(
-                flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335"
-            )
-            page.update()
+            snack(page, str(exc), ok=False)
         finally:
             await client.aclose()
 
-    current_password_field = flet.TextField(
+    current_password_field = themed_field(
         label=t("profile.current_password"),
         password=True,
         can_reveal_password=True,
         expand=True,
-        bgcolor="#ffffff",
-        border_color="#e0e0e0",
     )
-    new_password_field = flet.TextField(
+    new_password_field = themed_field(
         label=t("profile.new_password"),
         password=True,
         can_reveal_password=True,
         expand=True,
-        bgcolor="#ffffff",
-        border_color="#e0e0e0",
     )
-    password_error = flet.Text("", color="#ea4335", visible=False, size=12)
+    password_error = flet.Text("", color=flet.Colors.ERROR, visible=False, size=12)
 
     async def _change_password(e: flet.ControlEvent) -> None:
         password_error.visible = False
@@ -105,12 +122,7 @@ def profile_view(page: flet.Page, state: AppState) -> None:
             )
             current_password_field.value = ""
             new_password_field.value = ""
-            page.snack_bar = flet.SnackBar(
-                flet.Text(t("profile.password_changed"), color="#ffffff"),
-                open=True,
-                bgcolor="#008069",
-            )
-            page.update()
+            snack(page, t("profile.password_changed"))
         except AuthError:
             password_error.value = t("profile.password_incorrect")
             password_error.visible = True
@@ -120,10 +132,7 @@ def profile_view(page: flet.Page, state: AppState) -> None:
             password_error.visible = True
             page.update()
         except Exception as exc:
-            page.snack_bar = flet.SnackBar(
-                flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335"
-            )
-            page.update()
+            snack(page, str(exc), ok=False)
         finally:
             await client.aclose()
 
@@ -133,15 +142,13 @@ def profile_view(page: flet.Page, state: AppState) -> None:
         chat_list_view(page, state)
 
     # --- Language setting ---
-    language_dropdown = flet.Dropdown(
+    language_dropdown = _themed_dropdown(
         value=get_locale(),
         options=[
             flet.dropdown.Option(key=code, text=name)
             for code, name in AVAILABLE_LOCALES
         ],
         expand=True,
-        bgcolor="#ffffff",
-        border_color="#e0e0e0",
     )
 
     def _apply_language(e: flet.ControlEvent) -> None:
@@ -159,14 +166,12 @@ def profile_view(page: flet.Page, state: AppState) -> None:
         (t("profile.alignment_left"), "left"),
         (t("profile.alignment_right"), "right"),
     ]
-    alignment_dropdown = flet.Dropdown(
+    alignment_dropdown = _themed_dropdown(
         value=state.message_alignment,
         options=[
             flet.dropdown.Option(key=v, text=label) for label, v in _alignment_options
         ],
         expand=True,
-        bgcolor="#ffffff",
-        border_color="#e0e0e0",
     )
 
     def _on_alignment_change(e: flet.ControlEvent) -> None:
@@ -180,12 +185,7 @@ def profile_view(page: flet.Page, state: AppState) -> None:
             state.secure_storage.set(
                 "settings.message_alignment", state.message_alignment
             )
-        page.snack_bar = flet.SnackBar(
-            flet.Text(t("profile.setting_saved"), color="#ffffff"),
-            open=True,
-            bgcolor="#008069",
-        )
-        page.update()
+        snack(page, t("profile.setting_saved"))
 
     alignment_dropdown.on_change = _on_alignment_change
 
@@ -198,20 +198,13 @@ def profile_view(page: flet.Page, state: AppState) -> None:
         state.message_alignment = new_val
         if state.secure_storage is not None:
             state.secure_storage.set("settings.message_alignment", new_val)
-        page.snack_bar = flet.SnackBar(
-            flet.Text(t("profile.setting_saved"), color="#ffffff"),
-            open=True,
-            bgcolor="#008069",
-        )
-        page.update()
+        snack(page, t("profile.setting_saved"))
 
     # --- Server setting ---
-    server_url_field = flet.TextField(
+    server_url_field = themed_field(
         label=t("profile.server_url"),
         value=state.api_url,
         expand=True,
-        bgcolor="#ffffff",
-        border_color="#e0e0e0",
     )
 
     async def _save_server_url(e: flet.ControlEvent) -> None:
@@ -236,307 +229,151 @@ def profile_view(page: flet.Page, state: AppState) -> None:
         from views.login_view import login_view
         login_view(page, state)
 
+    def _info_row(icon: str, text: flet.Control | str) -> flet.Row:
+        return flet.Row(
+            controls=[
+                flet.Icon(icon, color=flet.Colors.ON_SURFACE_VARIANT, size=20),
+                text
+                if isinstance(text, flet.Control)
+                else flet.Text(text, size=14, color=flet.Colors.ON_SURFACE),
+            ],
+            spacing=12,
+        )
+
+    avatar_name = (
+        (user.display_name or user.username) if user else "?"
+    )
+
     page.controls.clear()
     page.add(
         flet.Column(
             controls=[
-                flet.Container(
-                    content=flet.Row(
-                        controls=[
-                            flet.IconButton(
-                                icon=flet.Icons.ARROW_BACK,
-                                on_click=_go_back,
-                                tooltip=t("profile.back"),
-                                icon_color="#ffffff",
-                            ),
-                            flet.Text(
-                                t("profile.title"),
-                                size=22,
-                                weight=flet.FontWeight.BOLD,
-                                color="#ffffff",
-                            ),
-                        ],
-                        vertical_alignment=flet.CrossAxisAlignment.CENTER,
-                    ),
-                    bgcolor="#008069",
-                    padding=flet.padding.symmetric(horizontal=8, vertical=8),
-                ),
+                surface_app_bar(t("profile.title"), on_back=_go_back),
                 flet.Container(
                     content=flet.Column(
                         controls=[
-                            flet.Card(
-                                content=flet.Container(
-                                    content=flet.Column(
+                            _section_card(
+                                [
+                                    flet.Row(
                                         controls=[
-                                            flet.Text(
-                                                t("profile.account_info"),
-                                                size=16,
-                                                weight=flet.FontWeight.W_600,
-                                                color="#111b21",
-                                            ),
-                                            flet.Divider(height=8),
-                                            flet.Row(
+                                            initials_avatar(avatar_name, size=64),
+                                            flet.Column(
                                                 controls=[
-                                                    flet.Icon(
+                                                    _info_row(
                                                         flet.Icons.BADGE,
-                                                        color="#667781",
-                                                    ),
-                                                    flet.Text(
                                                         t(
                                                             "profile.username",
                                                             username=user.username
                                                             if user
                                                             else "",
                                                         ),
-                                                        size=14,
-                                                        color="#111b21",
                                                     ),
-                                                ],
-                                                spacing=12,
-                                            ),
-                                            flet.Row(
-                                                controls=[
-                                                    flet.Icon(
+                                                    _info_row(
                                                         flet.Icons.EMAIL,
-                                                        color="#667781",
-                                                    ),
-                                                    flet.Text(
                                                         t(
                                                             "profile.email",
                                                             email=user.email
                                                             if user
                                                             else "",
                                                         ),
-                                                        size=14,
-                                                        color="#111b21",
                                                     ),
-                                                ],
-                                                spacing=12,
-                                            ),
-                                            flet.Row(
-                                                controls=[
-                                                    flet.Icon(
+                                                    _info_row(
                                                         flet.Icons.LABEL,
-                                                        color="#667781",
+                                                        display_name_info,
                                                     ),
-                                                    display_name_info,
                                                 ],
-                                                spacing=12,
+                                                spacing=8,
+                                                expand=True,
                                             ),
                                         ],
-                                        spacing=12,
+                                        spacing=16,
+                                        vertical_alignment=flet.CrossAxisAlignment.CENTER,
                                     ),
-                                    padding=20,
-                                ),
-                                bgcolor="#ffffff",
-                                elevation=1,
+                                ]
                             ),
-                            flet.Card(
-                                content=flet.Container(
-                                    content=flet.Column(
-                                        controls=[
-                                            flet.Text(
-                                                t("profile.update_display_name"),
-                                                size=16,
-                                                weight=flet.FontWeight.W_600,
-                                                color="#111b21",
-                                            ),
-                                            flet.Divider(height=8),
-                                            flet.Row(controls=[display_name_field]),
-                                            display_name_error,
-                                            flet.ElevatedButton(
-                                                t("profile.save"),
-                                                on_click=_save_display_name,
-                                                style=flet.ButtonStyle(
-                                                    bgcolor="#008069",
-                                                    color="#ffffff",
-                                                    shape=flet.RoundedRectangleBorder(
-                                                        radius=8
-                                                    ),
-                                                    padding=flet.padding.symmetric(
-                                                        vertical=12, horizontal=24
-                                                    ),
-                                                ),
-                                            ),
-                                        ],
-                                        spacing=12,
+                            _section_card(
+                                [
+                                    _section_title(t("profile.update_display_name")),
+                                    _section_divider(),
+                                    display_name_field,
+                                    display_name_error,
+                                    primary_button(
+                                        t("profile.save"),
+                                        on_click=_save_display_name,
                                     ),
-                                    padding=20,
-                                ),
-                                bgcolor="#ffffff",
-                                elevation=1,
+                                ]
                             ),
-                            flet.Card(
-                                content=flet.Container(
-                                    content=flet.Column(
-                                        controls=[
-                                            flet.Text(
-                                                t("profile.change_password"),
-                                                size=16,
-                                                weight=flet.FontWeight.W_600,
-                                                color="#111b21",
-                                            ),
-                                            flet.Divider(height=8),
-                                            flet.Row(controls=[current_password_field]),
-                                            flet.Row(controls=[new_password_field]),
-                                            password_error,
-                                            flet.ElevatedButton(
-                                                t("profile.change_password"),
-                                                on_click=_change_password,
-                                                style=flet.ButtonStyle(
-                                                    bgcolor="#008069",
-                                                    color="#ffffff",
-                                                    shape=flet.RoundedRectangleBorder(
-                                                        radius=8
-                                                    ),
-                                                    padding=flet.padding.symmetric(
-                                                        vertical=12, horizontal=24
-                                                    ),
-                                                ),
-                                            ),
-                                        ],
-                                        spacing=12,
+                            _section_card(
+                                [
+                                    _section_title(t("profile.change_password")),
+                                    _section_divider(),
+                                    current_password_field,
+                                    new_password_field,
+                                    password_error,
+                                    primary_button(
+                                        t("profile.change_password"),
+                                        on_click=_change_password,
                                     ),
-                                    padding=20,
-                                ),
-                                bgcolor="#ffffff",
-                                elevation=1,
+                                ]
                             ),
-                            flet.Card(
-                                content=flet.Container(
-                                    content=flet.Column(
-                                        controls=[
-                                            flet.Text(
-                                                t("language.title"),
-                                                size=16,
-                                                weight=flet.FontWeight.W_600,
-                                                color="#111b21",
-                                            ),
-                                            flet.Divider(height=8),
-                                            flet.Row(controls=[language_dropdown]),
-                                            flet.ElevatedButton(
-                                                t("language.apply"),
-                                                on_click=_apply_language,
-                                                style=flet.ButtonStyle(
-                                                    bgcolor="#008069",
-                                                    color="#ffffff",
-                                                    shape=flet.RoundedRectangleBorder(
-                                                        radius=8
-                                                    ),
-                                                    padding=flet.padding.symmetric(
-                                                        vertical=12, horizontal=24
-                                                    ),
-                                                ),
-                                            ),
-                                        ],
-                                        spacing=12,
+                            _section_card(
+                                [
+                                    _section_title(t("language.title")),
+                                    _section_divider(),
+                                    language_dropdown,
+                                    primary_button(
+                                        t("language.apply"),
+                                        on_click=_apply_language,
                                     ),
-                                    padding=20,
-                                ),
-                                bgcolor="#ffffff",
-                                elevation=1,
+                                ]
                             ),
-                            flet.Card(
-                                content=flet.Container(
-                                    content=flet.Column(
-                                        controls=[
-                                            flet.Text(
-                                                t("profile.message_alignment"),
-                                                size=16,
-                                                weight=flet.FontWeight.W_600,
-                                                color="#111b21",
-                                            ),
-                                            flet.Divider(height=8),
-                                            flet.Row(controls=[alignment_dropdown]),
-                                            flet.ElevatedButton(
-                                                t("profile.save"),
-                                                on_click=_save_alignment,
-                                                style=flet.ButtonStyle(
-                                                    bgcolor="#008069",
-                                                    color="#ffffff",
-                                                    shape=flet.RoundedRectangleBorder(
-                                                        radius=8
-                                                    ),
-                                                    padding=flet.padding.symmetric(
-                                                        vertical=12, horizontal=24
-                                                    ),
-                                                ),
-                                            ),
-                                        ],
-                                        spacing=12,
+                            _section_card(
+                                [
+                                    _section_title(t("profile.message_alignment")),
+                                    _section_divider(),
+                                    alignment_dropdown,
+                                    primary_button(
+                                        t("profile.save"),
+                                        on_click=_save_alignment,
                                     ),
-                                    padding=20,
-                                ),
-                                bgcolor="#ffffff",
-                                elevation=1,
+                                ]
                             ),
-                            flet.Card(
-                                content=flet.Container(
-                                    content=flet.Column(
-                                        controls=[
-                                            flet.Text(
-                                                t("profile.server_settings"),
-                                                size=16,
-                                                weight=flet.FontWeight.W_600,
-                                                color="#111b21",
-                                            ),
-                                            flet.Divider(height=8),
-                                            flet.Row(controls=[server_url_field]),
-                                            flet.ElevatedButton(
-                                                t("profile.save"),
-                                                on_click=_save_server_url,
-                                                style=flet.ButtonStyle(
-                                                    bgcolor="#008069",
-                                                    color="#ffffff",
-                                                    shape=flet.RoundedRectangleBorder(
-                                                        radius=8
-                                                    ),
-                                                    padding=flet.padding.symmetric(
-                                                        vertical=12, horizontal=24
-                                                    ),
-                                                ),
-                                            ),
-                                        ],
-                                        spacing=12,
+                            _section_card(
+                                [
+                                    _section_title(t("profile.server_settings")),
+                                    _section_divider(),
+                                    server_url_field,
+                                    primary_button(
+                                        t("profile.save"),
+                                        on_click=_save_server_url,
                                     ),
-                                    padding=20,
-                                ),
-                                bgcolor="#ffffff",
-                                elevation=1,
+                                ]
                             ),
-                            flet.Card(
-                                content=flet.Container(
-                                    content=flet.Column(
-                                        controls=[
-                                            flet.Text(
-                                                "Dev",
-                                                size=16,
-                                                weight=flet.FontWeight.W_600,
-                                                color="#ea4335",
-                                            ),
-                                            flet.Divider(height=8),
-                                            flet.ElevatedButton(
-                                                "Exit (show logs)",
-                                                icon=flet.Icons.BUG_REPORT,
-                                                on_click=lambda _: sys.exit(100),
-                                                style=flet.ButtonStyle(
-                                                    bgcolor="#ea4335",
-                                                    color="#ffffff",
-                                                    shape=flet.RoundedRectangleBorder(
-                                                        radius=8
-                                                    ),
-                                                    padding=flet.padding.symmetric(
-                                                        vertical=12, horizontal=24
-                                                    ),
-                                                ),
-                                            ),
-                                        ],
-                                        spacing=12,
+                            _section_card(
+                                [
+                                    flet.Text(
+                                        "Dev",
+                                        size=16,
+                                        weight=flet.FontWeight.W_600,
+                                        color=flet.Colors.ERROR,
                                     ),
-                                    padding=20,
-                                ),
-                                bgcolor="#ffffff",
-                                elevation=1,
+                                    _section_divider(),
+                                    flet.ElevatedButton(
+                                        "Exit (show logs)",
+                                        icon=flet.Icons.BUG_REPORT,
+                                        on_click=lambda _: sys.exit(100),
+                                        style=flet.ButtonStyle(
+                                            bgcolor=flet.Colors.ERROR,
+                                            color=flet.Colors.ON_ERROR,
+                                            shape=flet.RoundedRectangleBorder(
+                                                radius=12
+                                            ),
+                                            padding=flet.padding.symmetric(
+                                                vertical=14
+                                            ),
+                                        ),
+                                    ),
+                                ]
                             ),
                         ],
                         spacing=12,

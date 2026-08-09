@@ -105,10 +105,14 @@ class FormattingToolbar(ft.Row):
                 icon=action.icon,
                 tooltip=action.tooltip,
                 disabled=disabled,
+                icon_color=ft.Colors.ON_SURFACE_VARIANT,
+                icon_size=20,
                 on_click=lambda e, a=action: self._apply(a) if not disabled else None,
             )
             for action in actions
         ]
+        self.spacing = 0
+        self.tight = True
 
     def _apply(self, action: _FormatAction) -> None:
         """Apply a formatting action at the current cursor position or wrap selected text."""

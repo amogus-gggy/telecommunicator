@@ -4,6 +4,8 @@ from typing import Callable
 
 import flet as ft
 
+from ui.theme import themed_field
+
 # Compact built-in catalogue — no external dependency
 EMOJI_CATALOGUE: dict[str, list[tuple[str, str]]] = {
     "Smileys": [
@@ -633,10 +635,12 @@ class EmojiPicker(ft.Container):
         self._on_emoji_selected = on_emoji_selected
         self._on_close = on_close
 
-        self._search_field = ft.TextField(
+        self._search_field = themed_field(
             hint_text="Search emojis…",
             dense=True,
             height=40,
+            border_radius=20,
+            content_padding=ft.padding.symmetric(horizontal=16, vertical=8),
             on_change=self._on_search_change,
         )
 
@@ -654,13 +658,14 @@ class EmojiPicker(ft.Container):
             width=350,
             height=400,
             padding=ft.padding.all(8),
-            border_radius=ft.border_radius.all(12),
+            border_radius=ft.border_radius.all(16),
             shadow=ft.BoxShadow(
-                spread_radius=1,
-                blur_radius=12,
-                color=ft.Colors.with_opacity(0.3, ft.Colors.BLACK),
+                blur_radius=24,
+                spread_radius=-4,
+                color=ft.Colors.with_opacity(0.25, ft.Colors.SHADOW),
             ),
             bgcolor=ft.Colors.SURFACE,
+            border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
             visible=False,
             **kwargs,
         )
