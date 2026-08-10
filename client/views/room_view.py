@@ -637,6 +637,21 @@ def room_view(page: flet.Page, state: AppState) -> None:
         if not msg.get("is_encrypted"):
             return msg
 
+        # Fast path: previously decrypted body. Ratchet message keys are burned
+        # once used, so re-displaying history relies on the local plaintext store.
+        try:
+            from crypto.message_store import get_message_store
+
+            _mstore = get_message_store(state)
+            if _mstore is not None and msg.get("id") is not None:
+                _cached = _mstore.get(msg["id"])
+                if _cached is not None:
+                    msg["body"] = _cached
+                    msg["decrypted"] = True
+                    return msg
+        except Exception:  # noqa: BLE001 - store is an optimization, never fatal
+            pass
+
         # If current user is the sender, decrypt using the sender's own copy
         if (
             state.current_user is not None
@@ -670,6 +685,10 @@ def room_view(page: flet.Page, state: AppState) -> None:
         import logging
         from crypto.message_crypto import MessageDecryptor
         from crypto.key_generator import KeyGenerator
+        from crypto.double_ratchet import KeyConsumedError
+        from crypto.message_store import get_message_store
+        from crypto.ratchet_facade import RatchetDecryptor, peek_blob_version
+        from crypto.ratchet_session_store import get_session_store
         from cryptography.exceptions import InvalidSignature, InvalidTag
 
         try:
@@ -727,17 +746,32 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 return msg
 
             logging.info(f"[DECRYPT] Decrypting message from {sender_username}")
-            decryptor = MessageDecryptor()
             encrypted_data = {"blob": encrypted_blob, "signature": signature}
 
-            plaintext = decryptor.decrypt_message(
-                encrypted_msg=encrypted_data,
-                recipient_x25519_priv=state.x25519_private,
-                sender_ed25519_pub=sender_keys["ed25519_pub"],
-            )
+            if peek_blob_version(encrypted_blob) >= 2:
+                plaintext = RatchetDecryptor().decrypt_message(
+                    encrypted_data,
+                    peer_key=sender_username,
+                    recipient_x25519_priv=state.x25519_private,
+                    sender_ed25519_pub=sender_keys["ed25519_pub"],
+                    sender_x25519_pub=sender_keys["x25519_pub"],
+                    store=get_session_store(state),
+                )
+            else:
+                plaintext = MessageDecryptor().decrypt_message(
+                    encrypted_msg=encrypted_data,
+                    recipient_x25519_priv=state.x25519_private,
+                    sender_ed25519_pub=sender_keys["ed25519_pub"],
+                )
 
             msg["body"] = plaintext
             msg["decrypted"] = True
+            try:
+                _ms = get_message_store(state)
+                if _ms is not None and msg.get("id") is not None:
+                    _ms.put(msg["id"], plaintext)
+            except Exception:  # noqa: BLE001 - persistence is best-effort
+                logging.warning("[DECRYPT] Failed to persist plaintext to store")
             logging.info("[DECRYPT] Message decrypted successfully")
             return msg
 
@@ -753,6 +787,13 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 f"[DECRYPT] Decryption failed for message from {sender_username}"
             )
             msg["body"] = t("room.encrypted_bad_key")
+            msg["decryption_error"] = True
+            return msg
+        except KeyConsumedError:
+            logging.warning(
+                f"[DECRYPT] Ratchet key already consumed for message from {sender_username}"
+            )
+            msg["body"] = t("room.encrypted_key_gone")
             msg["decryption_error"] = True
             return msg
         except Exception as exc:
@@ -1245,7 +1286,8 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     try:
                         import base64
                         import logging
-                        from crypto.message_crypto import MessageEncryptor
+                        from crypto.ratchet_facade import RatchetEncryptor
+                        from crypto.ratchet_session_store import get_session_store
                         from crypto.key_generator import KeyGenerator
 
                         # Fetch recipient public keys
@@ -1298,14 +1340,16 @@ def room_view(page: flet.Page, state: AppState) -> None:
                         logging.info(
                             f"[SEND] Encrypting message for {recipient_username}"
                         )
-                        encryptor = MessageEncryptor()
+                        encryptor = RatchetEncryptor()
                         encrypted_data = encryptor.encrypt_message(
                             plaintext=resolved_body,
-                            recipient_x25519_pub=recipient_keys["x25519_pub"],
+                            peer_key=recipient_username,
+                            peer_identity_x25519_pub=recipient_keys["x25519_pub"],
                             sender_ed25519_priv=state.ed25519_private,
-                            sender_x25519_pub=state.x25519_private.public_key(),
+                            sender_x25519_priv=state.x25519_private,
                             sender_id=str(state.current_user.id),
                             recipient_id=recipient_id,
+                            store=get_session_store(state),
                         )
 
                         # Send encrypted message via API

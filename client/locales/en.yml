@@ -144,6 +144,7 @@ en:
     encrypted_malformed: "🔒 [Encrypted message — malformed]"
     encrypted_bad_signature: "⚠️ [Security warning: message signature invalid]"
     encrypted_bad_key: "🔒 [Decryption error: invalid key or tampered message]"
+    encrypted_key_gone: "🔒 [Encrypted message — key no longer available]"
     encrypted_error: "🔒 [Decryption error: %{exc}]"
     send_error: "Failed to send message: %{exc}"
 
