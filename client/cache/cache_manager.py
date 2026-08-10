@@ -35,13 +35,14 @@ class CacheManager:
         self._on_update_callbacks: dict[str, Callable] = {}
         self._active = False
 
-    async def get(self, key: str, fetch_fn: Callable) -> Any:
+    async def get(self, key: str, fetch_fn: Callable, force: bool = False) -> Any:
         """
         Get cached data or fetch if stale/missing.
 
         Args:
             key: Cache key (e.g., "personal_chats", "group_chats", "public_rooms")
             fetch_fn: Async function to call if cache miss or stale
+            force: Bypass the cache entirely and always fetch fresh data
 
         Returns:
             Cached or freshly fetched data
@@ -49,7 +50,7 @@ class CacheManager:
         now = datetime.now()
 
         # Check if we have a cache entry
-        if key in self._cache:
+        if not force and key in self._cache:
             entry = self._cache[key]
             age = (now - entry.timestamp).total_seconds()
 

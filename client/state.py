@@ -20,6 +20,7 @@ class UserDTO:
     username: str
     email: str
     display_name: str | None = None
+    server_name: str = ""
 
 
 @dataclass
@@ -32,6 +33,9 @@ class RoomDTO:
     is_private: bool
     allow_member_invite: bool
     read_only: bool
+    server_name: str = ""
+    remote_room_id: int | None = None
+    participants: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -42,6 +46,7 @@ class AppState:
     current_user: UserDTO | None = None
     active_room: RoomDTO | None = None
     message_alignment: str = "default"  # "default" | "left" | "right"
+    theme_mode: str = "system"  # "system" | "light" | "dark"
     secure_storage: Any = field(default=None, repr=False)
     # Single shared WebSocket connection (room messages + notifications)
     ws: "UnifiedWsClient | None" = field(default=None, repr=False)

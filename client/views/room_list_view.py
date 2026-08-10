@@ -6,27 +6,32 @@ from api.http_client import APIClient
 from api.ws_client import UnifiedWsClient
 from localization import t
 from state import AppState, RoomDTO
+from ui.theme import initials_avatar, primary_button, snack, themed_field
 
 
 def room_list_view(page: flet.Page, state: AppState) -> None:
-    page.bgcolor = "#f0f2f5"
+    page.bgcolor = flet.Colors.SURFACE_CONTAINER
     page.overlay.clear()
     all_rooms: list[dict] = []
     rooms_column = flet.Column(scroll=flet.ScrollMode.AUTO, expand=True, spacing=8)
-    search_field = flet.TextField(
-        label=t("room_list.search"),
+    search_field = themed_field(
+        hint_text=t("room_list.search"),
         prefix_icon=flet.Icons.SEARCH,
         expand=True,
         on_change=lambda e: _filter_rooms(e.control.value),
-        bgcolor="#ffffff",
-        border_color=flet.Colors.TRANSPARENT,
-        filled=True,
+        border_radius=20,
+        bgcolor=flet.Colors.SURFACE_CONTAINER_HIGH,
     )
-    status_text = flet.Text("", color="#667781", size=12)
+    status_text = flet.Text("", color=flet.Colors.ON_SURFACE_VARIANT, size=12)
 
-    new_room_name = flet.TextField(label=t("room_list.room_name"), autofocus=True)
-    private_toggle = flet.Switch(label=t("room_list.private_room"), value=False)
-    create_error = flet.Text("", color="#ea4335", visible=False, size=12)
+    new_room_name = themed_field(label=t("room_list.room_name"), autofocus=True)
+    private_toggle = flet.Switch(
+        label=t("room_list.private_room"),
+        value=False,
+        active_color=flet.Colors.PRIMARY,
+        label_text_style=flet.TextStyle(color=flet.Colors.ON_SURFACE, size=14),
+    )
+    create_error = flet.Text("", color=flet.Colors.ERROR, visible=False, size=12)
 
     async def _do_create_room(e: flet.ControlEvent) -> None:
         create_error.visible = False
@@ -38,7 +43,7 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
                 is_private=private_toggle.value or False,
             )
             state.active_room = RoomDTO(
-                **{k: room_data[k] for k in RoomDTO.__dataclass_fields__}
+                **{k: room_data.get(k) for k in RoomDTO.__dataclass_fields__}
             )
             create_dialog.open = False
             page.update()
@@ -57,7 +62,7 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
         title=flet.Text(
             t("room_list.create_room_title"),
             weight=flet.FontWeight.BOLD,
-            color="#111b21",
+            color=flet.Colors.ON_SURFACE,
         ),
         content=flet.Column(
             controls=[new_room_name, private_toggle, create_error],
@@ -68,14 +73,11 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
             flet.TextButton(
                 t("room_list.cancel"),
                 on_click=lambda e: _close_dialog(),
-                style=flet.ButtonStyle(color="#008069"),
+                style=flet.ButtonStyle(color=flet.Colors.PRIMARY),
             ),
-            flet.ElevatedButton(
-                t("room_list.create"),
-                on_click=_do_create_room,
-                style=flet.ButtonStyle(bgcolor="#008069", color="#ffffff"),
-            ),
+            primary_button(t("room_list.create"), on_click=_do_create_room),
         ],
+        bgcolor=flet.Colors.SURFACE,
     )
 
     def _close_dialog() -> None:
@@ -98,7 +100,6 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
 
     def _build_room_tile(room: dict) -> flet.Control:
         member = _is_member(room)
-        name_initial = (room.get("name") or "?")[0].upper()
 
         async def on_join(e: flet.ControlEvent, r: dict = room) -> None:
             client = APIClient(state=state)
@@ -112,10 +113,7 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
 
                 room_view(page, state)
             except Exception as exc:
-                page.snack_bar = flet.SnackBar(
-                    flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335"
-                )
-                page.update()
+                snack(page, str(exc), ok=False)
             finally:
                 await client.aclose()
 
@@ -128,13 +126,21 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
 
             room_view(page, state)
 
+        def on_hover(e: flet.ControlEvent) -> None:
+            e.control.bgcolor = (
+                flet.Colors.SURFACE_CONTAINER_HIGH
+                if e.data == "true"
+                else flet.Colors.TRANSPARENT
+            )
+            e.control.update()
+
         action_btn = (
             flet.ElevatedButton(
                 t("room_list.open"),
                 on_click=on_open,
                 style=flet.ButtonStyle(
-                    bgcolor="#d9fdd3",
-                    color="#111b21",
+                    bgcolor=flet.Colors.PRIMARY_CONTAINER,
+                    color=flet.Colors.ON_PRIMARY_CONTAINER,
                     shape=flet.RoundedRectangleBorder(radius=20),
                     padding=flet.padding.symmetric(horizontal=16, vertical=8),
                 ),
@@ -144,56 +150,48 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
                 t("room_list.join"),
                 on_click=on_join,
                 style=flet.ButtonStyle(
-                    color="#008069",
+                    color=flet.Colors.PRIMARY,
+                    side=flet.BorderSide(1, flet.Colors.PRIMARY),
                     shape=flet.RoundedRectangleBorder(radius=20),
                     padding=flet.padding.symmetric(horizontal=16, vertical=8),
                 ),
             )
         )
 
-        return flet.Card(
-            content=flet.Container(
-                content=flet.Row(
-                    controls=[
-                        flet.CircleAvatar(
-                            content=flet.Text(
-                                name_initial,
-                                color="#ffffff",
-                                weight=flet.FontWeight.BOLD,
-                                size=16,
+        return flet.Container(
+            content=flet.Row(
+                controls=[
+                    initials_avatar(room.get("name") or "?", size=44),
+                    flet.Column(
+                        controls=[
+                            flet.Text(
+                                room["name"],
+                                weight=flet.FontWeight.W_600,
+                                size=15,
+                                color=flet.Colors.ON_SURFACE,
                             ),
-                            bgcolor="#008069",
-                        ),
-                        flet.Column(
-                            controls=[
-                                flet.Text(
-                                    room["name"],
-                                    weight=flet.FontWeight.BOLD,
-                                    size=15,
-                                    color="#111b21",
+                            flet.Text(
+                                t(
+                                    "room_list.owner_members",
+                                    owner=room["owner_username"],
+                                    count=room["member_count"],
                                 ),
-                                flet.Text(
-                                    t(
-                                        "room_list.owner_members",
-                                        owner=room["owner_username"],
-                                        count=room["member_count"],
-                                    ),
-                                    size=12,
-                                    color="#667781",
-                                ),
-                            ],
-                            expand=True,
-                            spacing=2,
-                        ),
-                        action_btn,
-                    ],
-                    alignment=flet.MainAxisAlignment.SPACE_BETWEEN,
-                    vertical_alignment=flet.CrossAxisAlignment.CENTER,
-                ),
-                padding=flet.padding.symmetric(horizontal=16, vertical=12),
+                                size=12.5,
+                                color=flet.Colors.ON_SURFACE_VARIANT,
+                            ),
+                        ],
+                        expand=True,
+                        spacing=2,
+                    ),
+                    action_btn,
+                ],
+                vertical_alignment=flet.CrossAxisAlignment.CENTER,
+                spacing=12,
             ),
-            bgcolor="#ffffff",
-            elevation=1,
+            padding=flet.padding.symmetric(horizontal=12, vertical=8),
+            border_radius=12,
+            bgcolor=flet.Colors.TRANSPARENT,
+            on_hover=on_hover,
         )
 
     def _filter_rooms(query: str) -> None:
@@ -204,7 +202,7 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
             rooms_column.controls.append(_build_room_tile(r))
         if not filtered:
             rooms_column.controls.append(
-                flet.Text(t("room_list.no_rooms"), color="#667781")
+                flet.Text(t("room_list.no_rooms"), color=flet.Colors.ON_SURFACE_VARIANT)
             )
         page.update()
 
@@ -261,12 +259,7 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
     def _on_notification(payload: dict) -> None:
         if payload.get("type") == "invite":
             room_name = payload.get("payload", {}).get("name", "")
-            page.snack_bar = flet.SnackBar(
-                flet.Text(t("room_list.invited", room=room_name), color="#ffffff"),
-                open=True,
-                bgcolor="#008069",
-            )
-            page.update()
+            snack(page, t("room_list.invited", room=room_name))
             page.run_task(_load_rooms)
 
     async def _start_notifications() -> None:
@@ -299,21 +292,21 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
                     t("room_list.title"),
                     size=22,
                     weight=flet.FontWeight.BOLD,
-                    color="#ffffff",
+                    color=flet.Colors.ON_SURFACE,
                     expand=True,
                 ),
                 flet.IconButton(
                     icon=flet.Icons.REFRESH,
                     on_click=lambda e: page.run_task(_load_rooms),
                     tooltip=t("room_list.refresh"),
-                    icon_color="#ffffff",
+                    icon_color=flet.Colors.ON_SURFACE_VARIANT,
                 ),
                 flet.ElevatedButton(
                     t("room_list.create_room"),
                     on_click=_open_create_dialog,
                     style=flet.ButtonStyle(
-                        bgcolor="#00a884",
-                        color="#ffffff",
+                        bgcolor=flet.Colors.PRIMARY,
+                        color=flet.Colors.ON_PRIMARY,
                         shape=flet.RoundedRectangleBorder(radius=20),
                         padding=flet.padding.symmetric(horizontal=16, vertical=8),
                     ),
@@ -322,19 +315,20 @@ def room_list_view(page: flet.Page, state: AppState) -> None:
                     icon=flet.Icons.PERSON,
                     on_click=_go_profile,
                     tooltip=t("room_list.profile"),
-                    icon_color="#ffffff",
+                    icon_color=flet.Colors.ON_SURFACE_VARIANT,
                 ),
                 flet.TextButton(
                     t("room_list.logout"),
                     on_click=do_logout,
-                    style=flet.ButtonStyle(color="#ffffff"),
+                    style=flet.ButtonStyle(color=flet.Colors.ON_SURFACE_VARIANT),
                 ),
             ],
             alignment=flet.MainAxisAlignment.SPACE_BETWEEN,
             vertical_alignment=flet.CrossAxisAlignment.CENTER,
         ),
-        bgcolor="#008069",
-        padding=flet.padding.symmetric(horizontal=16, vertical=12),
+        bgcolor=flet.Colors.SURFACE,
+        padding=flet.padding.symmetric(horizontal=16, vertical=10),
+        border=flet.border.only(bottom=flet.BorderSide(1, flet.Colors.OUTLINE_VARIANT)),
     )
 
     page.controls.clear()

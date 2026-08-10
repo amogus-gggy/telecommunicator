@@ -4,6 +4,10 @@ import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
+from app.services.rate_limit import limiter
 
 
 async def run_migrations() -> None:
@@ -21,13 +25,22 @@ async def run_migrations() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await run_migrations()
-    yield
+    try:
+        yield
+    finally:
+        from app.services.federation_service import close_federation_clients
+
+        await close_federation_clients()
 
 
 app = FastAPI(title="Telecommunicator", lifespan=lifespan)
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 from app.routers import auth as auth_router  # noqa: E402
 from app.routers import backup as backup_router  # noqa: E402
+from app.routers import federation as federation_router  # noqa: E402
 from app.routers import messages as messages_router  # noqa: E402
 from app.routers import rooms as rooms_router  # noqa: E402
 from app.routers import users as users_router  # noqa: E402
@@ -39,3 +52,4 @@ app.include_router(messages_router.router)
 app.include_router(users_router.router)
 app.include_router(ws_router.router)
 app.include_router(backup_router.router)
+app.include_router(federation_router.router)

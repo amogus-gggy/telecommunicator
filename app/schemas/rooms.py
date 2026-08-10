@@ -18,6 +18,9 @@ class RoomResponse(BaseModel):
     is_private: bool
     allow_member_invite: bool
     read_only: bool
+    server_name: str | None = None
+    remote_room_id: int | None = None
+    participants: list[str] = []
 
 
 class PermissionUpdate(BaseModel):

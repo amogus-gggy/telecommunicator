@@ -1,0 +1,14 @@
+.git
+.env
+.gitignore
+.idea
+.pytest_cache
+__pycache__
+*.pyc
+messenger.db
+uploads
+client
+tests
+Dockerfile
+docker-compose.yml
+docker-compose.override.yml

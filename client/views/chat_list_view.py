@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+
 import flet
 
 from api.http_client import APIClient
@@ -8,13 +9,14 @@ from api.ws_client import UnifiedWsClient
 from cache.cache_manager import CacheManager
 from localization import t
 from state import AppState, RoomDTO
+from ui.theme import initials_avatar, primary_button, snack, themed_field
 
 
 def chat_list_view(page: flet.Page, state: AppState) -> None:
-    page.bgcolor = "#f0f2f5"
+    page.bgcolor = flet.Colors.SURFACE_CONTAINER
     page.overlay.clear()
 
-    cache_manager = CacheManager(refresh_interval=30, max_age=300)
+    cache_manager = CacheManager(refresh_interval=10, max_age=300)
 
     personal_chats: list[dict] = []
     group_chats: list[dict] = []
@@ -40,17 +42,14 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             _search_task.cancel()
         _search_task = page.run_task(_debounced_filter, e.control.value)
 
-    search_field = flet.TextField(
-        label=t("chat_list.search"),
+    search_field = themed_field(
+        hint_text=t("chat_list.search"),
         prefix_icon=flet.Icons.SEARCH,
         expand=True,
         on_change=_on_search_change,
-        bgcolor="#ffffff",
-        border_color=flet.Colors.TRANSPARENT,
-        filled=True,
+        border_radius=20,
+        bgcolor=flet.Colors.SURFACE_CONTAINER_HIGH,
     )
-
-    status_text = flet.Text("", color="#667781", size=12)
 
     tabs = flet.Tabs(
         selected_index=0,
@@ -84,8 +83,10 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
     )
 
     # --- Диалог личного чата ---
-    username_field = flet.TextField(label=t("chat_list.username_field"), autofocus=True)
-    personal_error = flet.Text("", color="#ea4335", visible=False, size=12)
+    username_field = themed_field(
+        label=t("chat_list.username_field"), autofocus=True
+    )
+    personal_error = flet.Text("", color=flet.Colors.ERROR, visible=False, size=12)
 
     async def _create_personal_chat(e: flet.ControlEvent) -> None:
         personal_error.visible = False
@@ -94,7 +95,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
         try:
             room_data = await client.create_personal_chat(username_field.value or "")
             state.active_room = RoomDTO(
-                **{k: room_data[k] for k in RoomDTO.__dataclass_fields__}
+                **{k: room_data.get(k) for k in RoomDTO.__dataclass_fields__}
             )
             personal_dialog.open = False
             page.update()
@@ -113,7 +114,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
         title=flet.Text(
             t("chat_list.new_personal_chat"),
             weight=flet.FontWeight.BOLD,
-            color="#111b21",
+            color=flet.Colors.ON_SURFACE,
         ),
         content=flet.Column(
             controls=[username_field, personal_error], tight=True, spacing=8
@@ -122,22 +123,24 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             flet.TextButton(
                 t("chat_list.cancel"),
                 on_click=lambda e: _close_personal_dialog(),
-                style=flet.ButtonStyle(color="#008069"),
+                style=flet.ButtonStyle(color=flet.Colors.PRIMARY),
             ),
-            flet.ElevatedButton(
-                t("chat_list.create"),
-                on_click=_create_personal_chat,
-                style=flet.ButtonStyle(bgcolor="#008069", color="#ffffff"),
-            ),
+            primary_button(t("chat_list.create"), on_click=_create_personal_chat),
         ],
+        bgcolor=flet.Colors.SURFACE,
     )
 
     # --- Диалог группового чата ---
-    group_name_field = flet.TextField(
+    group_name_field = themed_field(
         label=t("chat_list.group_name_field"), autofocus=True
     )
-    public_toggle = flet.Switch(label=t("chat_list.public_group"), value=False)
-    group_error = flet.Text("", color="#ea4335", visible=False, size=12)
+    public_toggle = flet.Switch(
+        label=t("chat_list.public_group"),
+        value=False,
+        active_color=flet.Colors.PRIMARY,
+        label_text_style=flet.TextStyle(color=flet.Colors.ON_SURFACE, size=14),
+    )
+    group_error = flet.Text("", color=flet.Colors.ERROR, visible=False, size=12)
 
     async def _create_group_chat(e: flet.ControlEvent) -> None:
         group_error.visible = False
@@ -151,7 +154,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
                 is_private=not public_toggle.value,
             )
             state.active_room = RoomDTO(
-                **{k: room_data[k] for k in RoomDTO.__dataclass_fields__}
+                **{k: room_data.get(k) for k in RoomDTO.__dataclass_fields__}
             )
             group_dialog.open = False
             page.update()
@@ -168,7 +171,9 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
 
     group_dialog = flet.AlertDialog(
         title=flet.Text(
-            t("chat_list.new_group_chat"), weight=flet.FontWeight.BOLD, color="#111b21"
+            t("chat_list.new_group_chat"),
+            weight=flet.FontWeight.BOLD,
+            color=flet.Colors.ON_SURFACE,
         ),
         content=flet.Column(
             controls=[group_name_field, public_toggle, group_error],
@@ -179,14 +184,11 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             flet.TextButton(
                 t("chat_list.cancel"),
                 on_click=lambda e: _close_group_dialog(),
-                style=flet.ButtonStyle(color="#008069"),
+                style=flet.ButtonStyle(color=flet.Colors.PRIMARY),
             ),
-            flet.ElevatedButton(
-                t("chat_list.create"),
-                on_click=_create_group_chat,
-                style=flet.ButtonStyle(bgcolor="#008069", color="#ffffff"),
-            ),
+            primary_button(t("chat_list.create"), on_click=_create_group_chat),
         ],
+        bgcolor=flet.Colors.SURFACE,
     )
 
     def _close_personal_dialog() -> None:
@@ -224,9 +226,12 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
                     icon=flet.Icons.PERSON_ADD,
                     on_click=_open_personal_dialog,
                     style=flet.ButtonStyle(
-                        bgcolor="#25d366",
-                        color="#ffffff",
+                        bgcolor=flet.Colors.PRIMARY,
+                        color=flet.Colors.ON_PRIMARY,
                         shape=flet.RoundedRectangleBorder(radius=20),
+                        padding=flet.padding.symmetric(
+                            vertical=12, horizontal=16
+                        ),
                     ),
                 )
             )
@@ -237,9 +242,12 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
                     icon=flet.Icons.GROUP_ADD,
                     on_click=_open_group_dialog,
                     style=flet.ButtonStyle(
-                        bgcolor="#008069",
-                        color="#ffffff",
+                        bgcolor=flet.Colors.PRIMARY,
+                        color=flet.Colors.ON_PRIMARY,
                         shape=flet.RoundedRectangleBorder(radius=20),
+                        padding=flet.padding.symmetric(
+                            vertical=12, horizontal=16
+                        ),
                     ),
                 )
             )
@@ -253,12 +261,22 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
     # --- Отображение чатов ---
     def _get_chat_display_name(room: dict) -> str:
         if room.get("room_type") == "personal":
+            my_username = state.current_user.username if state.current_user else ""
+            # Prefer full member handles so remote users show as "user@server"
+            counterpart = next(
+                (
+                    p
+                    for p in room.get("participants") or []
+                    if p.split("@", 1)[0] != my_username
+                ),
+                None,
+            )
+            if counterpart:
+                return counterpart
             name = room.get("name", "")
-            if state.current_user and state.current_user.username in name:
+            if my_username and my_username in name:
                 parts = name.split(", ")
-                return next(
-                    (p for p in parts if p != state.current_user.username), name
-                )
+                return next((p for p in parts if p != my_username), name)
             return name
         return room.get("name", "")
 
@@ -269,33 +287,31 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             return _tile_cache[room_id]
 
         display_name = _get_chat_display_name(room)
-        name_initial = display_name[0].upper() if display_name else "?"
         room_type = room.get("room_type", "public")
 
         if room_type == "personal":
             icon = flet.Icons.PERSON
-            icon_color = "#25d366"
         elif room_type == "group":
             icon = flet.Icons.GROUP
-            icon_color = "#008069"
         else:
             icon = flet.Icons.PUBLIC
-            icon_color = "#667781"
 
         async def on_open(e: flet.ControlEvent, r: dict = room) -> None:
-            print(
-                f"[chat_list] opening room id={r['id']} name={r.get('name')!r} type={r.get('room_type')}"
-            )
             state.active_room = RoomDTO(
                 **{k: r[k] for k in RoomDTO.__dataclass_fields__}
             )
             _stop_refresh()
-            print("[chat_list] refresh stopped, importing room_view...")
             from views.room_view import room_view
 
-            print("[chat_list] calling room_view...")
             room_view(page, state)
-            print("[chat_list] room_view returned")
+
+        def on_hover(e: flet.ControlEvent) -> None:
+            e.control.bgcolor = (
+                flet.Colors.SURFACE_CONTAINER_HIGH
+                if e.data == "true"
+                else flet.Colors.TRANSPARENT
+            )
+            e.control.update()
 
         subtitle_parts = []
         if room_type != "personal":
@@ -307,61 +323,57 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
 
         subtitle = " • ".join(subtitle_parts) if subtitle_parts else t("chat_list.chat")
 
-        tile = flet.Card(
-            content=flet.Container(
-                content=flet.Row(
-                    controls=[
-                        flet.Stack(
-                            controls=[
-                                flet.CircleAvatar(
-                                    content=flet.Text(
-                                        name_initial,
-                                        color="#ffffff",
-                                        weight=flet.FontWeight.BOLD,
-                                        size=16,
-                                    ),
-                                    bgcolor="#008069",
+        tile = flet.Container(
+            content=flet.Row(
+                controls=[
+                    flet.Stack(
+                        controls=[
+                            initials_avatar(display_name, size=44),
+                            flet.Container(
+                                content=flet.Icon(
+                                    icon, size=12, color=flet.Colors.ON_PRIMARY
                                 ),
-                                flet.Container(
-                                    content=flet.Icon(icon, size=12, color="#ffffff"),
-                                    bgcolor=icon_color,
-                                    border_radius=10,
-                                    padding=2,
-                                    right=0,
-                                    bottom=0,
-                                ),
-                            ],
-                            width=40,
-                            height=40,
-                        ),
-                        flet.Column(
-                            controls=[
-                                flet.Text(
-                                    display_name,
-                                    weight=flet.FontWeight.BOLD,
-                                    size=15,
-                                    color="#111b21",
-                                ),
-                                flet.Text(subtitle, size=12, color="#667781"),
-                            ],
-                            expand=True,
-                            spacing=2,
-                        ),
-                        flet.IconButton(
-                            icon=flet.Icons.ARROW_FORWARD_IOS,
-                            icon_size=16,
-                            icon_color="#667781",
-                            on_click=on_open,
-                        ),
-                    ],
-                    alignment=flet.MainAxisAlignment.SPACE_BETWEEN,
-                    vertical_alignment=flet.CrossAxisAlignment.CENTER,
-                ),
-                padding=flet.padding.symmetric(horizontal=16, vertical=12),
-                on_click=on_open,
+                                bgcolor=flet.Colors.PRIMARY,
+                                border_radius=10,
+                                padding=2,
+                                right=0,
+                                bottom=0,
+                            ),
+                        ],
+                        width=44,
+                        height=44,
+                    ),
+                    flet.Column(
+                        controls=[
+                            flet.Text(
+                                display_name,
+                                weight=flet.FontWeight.W_600,
+                                size=15,
+                                color=flet.Colors.ON_SURFACE,
+                            ),
+                            flet.Text(
+                                subtitle,
+                                size=12.5,
+                                color=flet.Colors.ON_SURFACE_VARIANT,
+                            ),
+                        ],
+                        expand=True,
+                        spacing=2,
+                    ),
+                    flet.Icon(
+                        flet.Icons.CHEVRON_RIGHT,
+                        size=20,
+                        color=flet.Colors.ON_SURFACE_VARIANT,
+                    ),
+                ],
+                vertical_alignment=flet.CrossAxisAlignment.CENTER,
+                spacing=12,
             ),
-            bgcolor="#ffffff",
-            elevation=1,
+            padding=flet.padding.symmetric(horizontal=12, vertical=8),
+            border_radius=12,
+            bgcolor=flet.Colors.TRANSPARENT,
+            on_click=on_open,
+            on_hover=on_hover,
         )
 
         _tile_cache[room_id] = tile
@@ -393,7 +405,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             personal_column.controls.append(
                 flet.Text(
                     t("chat_list.no_personal"),
-                    color="#667781",
+                    color=flet.Colors.ON_SURFACE_VARIANT,
                     text_align=flet.TextAlign.CENTER,
                 )
             )
@@ -405,7 +417,7 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             group_column.controls.append(
                 flet.Text(
                     t("chat_list.no_groups"),
-                    color="#667781",
+                    color=flet.Colors.ON_SURFACE_VARIANT,
                     text_align=flet.TextAlign.CENTER,
                 )
             )
@@ -417,39 +429,41 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             public_column.controls.append(
                 flet.Text(
                     t("chat_list.no_public"),
-                    color="#667781",
+                    color=flet.Colors.ON_SURFACE_VARIANT,
                     text_align=flet.TextAlign.CENTER,
                 )
             )
 
         page.update()
 
-    async def _load_chats() -> None:
+    def _apply_data(my_chats: list[dict], public: list[dict]) -> bool:
+        """Replace list data and re-render only if something changed."""
         nonlocal personal_chats, group_chats, public_rooms
-        status_text.value = t("chat_list.loading")
-        page.update()
+        new_personal = [r for r in my_chats if r.get("room_type") == "personal"]
+        new_groups = [r for r in my_chats if r.get("room_type") == "group"]
+        if (new_personal, new_groups, public) == (
+            personal_chats,
+            group_chats,
+            public_rooms,
+        ):
+            return False
+        personal_chats, group_chats, public_rooms = new_personal, new_groups, public
+        _invalidate_tile_cache()
+        _filter_chats(search_field.value or "")
+        return True
 
+    async def _load_chats() -> None:
+        # Always fetch fresh data — the cache must not block explicit refreshes
+        # (manual button, WS notifications), otherwise the list goes stale.
         client = APIClient(state=state)
         try:
-
-            async def fetch_my_chats():
-                return await client.get_my_rooms()
-
-            async def fetch_public_rooms():
-                return await client.list_rooms()
-
-            my_chats = await cache_manager.get("my_chats", fetch_my_chats)
-            personal_chats = [r for r in my_chats if r.get("room_type") == "personal"]
-            group_chats = [r for r in my_chats if r.get("room_type") == "group"]
-            public_rooms = await cache_manager.get("public_rooms", fetch_public_rooms)
-
-            _invalidate_tile_cache()
-            _filter_chats(search_field.value or "")
-
-            total = len(personal_chats) + len(group_chats) + len(public_rooms)
-            status_text.value = t("chat_list.loaded", total=total)
+            my_chats, public = await asyncio.gather(
+                cache_manager.get("my_chats", client.get_my_rooms, force=True),
+                cache_manager.get("public_rooms", client.list_rooms, force=True),
+            )
+            _apply_data(my_chats, public)
         except Exception as exc:
-            status_text.value = t("chat_list.error_loading", exc=exc)
+            snack(page, str(exc), ok=False)
         finally:
             page.update()
             await client.aclose()
@@ -467,41 +481,23 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
 
         profile_view(page, state)
 
-    _active = {"running": True}
     state.close_notif_ws()
 
-    async def _auto_refresh() -> None:
-        import asyncio
-
-        while _active["running"]:
-            await asyncio.sleep(10)
-            if not _active["running"]:
-                break
-            await _load_chats()
-
     def _on_notification(payload: dict) -> None:
-        if payload.get("type") == "invite":
+        msg_type = payload.get("type")
+        if msg_type == "invite":
             room_name = payload.get("payload", {}).get("name", "")
-            page.snack_bar = flet.SnackBar(
-                flet.Text(t("chat_list.invited", room=room_name), color="#ffffff"),
-                open=True,
-                bgcolor="#008069",
-            )
-            page.update()
+            snack(page, t("chat_list.invited", room=room_name))
             page.run_task(_load_chats)
-        elif payload.get("type") == "member_joined":
+        elif msg_type == "member_joined":
             data = payload.get("payload", {})
             username = data.get("username", "")
             room_name = data.get("room_name", "")
-            page.snack_bar = flet.SnackBar(
-                flet.Text(
-                    t("chat_list.member_joined", username=username, room=room_name),
-                    color="#ffffff",
-                ),
-                open=True,
-                bgcolor="#25d366",
+            snack(
+                page,
+                t("chat_list.member_joined", username=username, room=room_name),
             )
-            page.update()
+            page.run_task(_load_chats)
 
     async def _start_notifications() -> None:
         # Reuse existing connection if already alive, otherwise create one
@@ -518,36 +514,24 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
         await nc.connect()
 
     def _start_background_refresh() -> None:
-        client = APIClient(state=state)
-
-        async def fetch_my_chats():
-            return await client.get_my_rooms()
-
-        async def fetch_public_rooms():
-            return await client.list_rooms()
-
         def on_my_chats_update(data):
-            nonlocal personal_chats, group_chats
-            personal_chats = [r for r in data if r.get("room_type") == "personal"]
-            group_chats = [r for r in data if r.get("room_type") == "group"]
-            _invalidate_tile_cache()
-            _filter_chats(search_field.value or "")
+            _apply_data(data, public_rooms)
 
         def on_public_rooms_update(data):
-            nonlocal public_rooms
-            public_rooms = data
-            _invalidate_tile_cache()
-            _filter_chats(search_field.value or "")
+            _apply_data(personal_chats + group_chats, data)
 
         cache_manager.start_background_refresh(
-            "my_chats", fetch_my_chats, on_my_chats_update
+            "my_chats",
+            lambda: APIClient(state=state).get_my_rooms(),
+            on_my_chats_update,
         )
         cache_manager.start_background_refresh(
-            "public_rooms", fetch_public_rooms, on_public_rooms_update
+            "public_rooms",
+            lambda: APIClient(state=state).list_rooms(),
+            on_public_rooms_update,
         )
 
     def _stop_refresh() -> None:
-        _active["running"] = False
         cache_manager.stop_background_refresh()
         # Don't close the WS here — room_view will reuse it.
         # Only clear the notification callback so stale notifications are ignored.
@@ -561,32 +545,33 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
                     t("chat_list.title"),
                     size=22,
                     weight=flet.FontWeight.BOLD,
-                    color="#ffffff",
+                    color=flet.Colors.ON_SURFACE,
                     expand=True,
                 ),
                 flet.IconButton(
                     icon=flet.Icons.REFRESH,
                     on_click=lambda e: page.run_task(_load_chats),
                     tooltip=t("chat_list.refresh"),
-                    icon_color="#ffffff",
+                    icon_color=flet.Colors.ON_SURFACE_VARIANT,
                 ),
                 flet.IconButton(
                     icon=flet.Icons.PERSON,
                     on_click=_go_profile,
                     tooltip=t("chat_list.profile"),
-                    icon_color="#ffffff",
+                    icon_color=flet.Colors.ON_SURFACE_VARIANT,
                 ),
                 flet.TextButton(
                     t("chat_list.logout"),
                     on_click=do_logout,
-                    style=flet.ButtonStyle(color="#ffffff"),
+                    style=flet.ButtonStyle(color=flet.Colors.ON_SURFACE_VARIANT),
                 ),
             ],
             alignment=flet.MainAxisAlignment.SPACE_BETWEEN,
             vertical_alignment=flet.CrossAxisAlignment.CENTER,
         ),
-        bgcolor="#008069",
-        padding=flet.padding.symmetric(horizontal=16, vertical=12),
+        bgcolor=flet.Colors.SURFACE,
+        padding=flet.padding.symmetric(horizontal=16, vertical=10),
+        border=flet.border.only(bottom=flet.BorderSide(1, flet.Colors.OUTLINE_VARIANT)),
     )
 
     page.controls.clear()
@@ -597,9 +582,6 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
                 flet.Container(
                     content=flet.Row(controls=[search_field]),
                     padding=flet.padding.symmetric(horizontal=16, vertical=8),
-                ),
-                flet.Container(
-                    content=status_text, padding=flet.padding.symmetric(horizontal=16)
                 ),
                 flet.Container(
                     content=create_buttons,
@@ -615,6 +597,5 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
     _update_create_buttons()
     page.update()
     page.run_task(_load_chats)
-    page.run_task(_auto_refresh)
     page.run_task(_start_notifications)
     _start_background_refresh()

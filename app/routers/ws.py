@@ -60,7 +60,7 @@ async def websocket_endpoint(
                 )
             )
             if membership.scalar_one_or_none() is not None:
-                await manager.connect(room_id, ws)
+                await manager.connect(room_id, ws, user.id)
                 joined_rooms.add(room_id)
 
         try:
@@ -118,7 +118,7 @@ async def websocket_endpoint(
 
                 # Ensure subscribed to this room
                 if froom_id not in joined_rooms:
-                    await manager.connect(froom_id, ws)
+                    await manager.connect(froom_id, ws, user.id)
                     joined_rooms.add(froom_id)
 
                 try:

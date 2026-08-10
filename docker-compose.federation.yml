@@ -1,0 +1,54 @@
+# Two federated Telecommunicator instances.
+#
+# SERVER_ADDRESS is THE address of each instance: what clients use to connect,
+# what appears in user@server handles, and what other servers use to reach us
+# for federation. With `network_mode: host` each container WRITES DIRECTLY to
+# the host network, so 127.0.0.1:8001 (A) and 127.0.0.1:8011 (B) are on the
+# same loopback — the two instances reach each other with no extra config.
+#
+#   dev:  http://127.0.0.1:8001 / http://127.0.0.1:8011
+#   prod: https://chat.example.com:443 (domain pointing at your VPS)
+#
+# Usage:
+#   docker compose -f docker-compose.federation.yml up --build -d
+
+services:
+  server-a:
+    build: .
+    image: telecommunicator-api
+    container_name: telecommunicator-server-a
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      SECRET_KEY: ${SECRET_KEY_A:?set SECRET_KEY_A in a .env}
+      SERVER_ADDRESS: http://127.0.0.1:8001
+      PORT: 8001
+      DATABASE_URL: sqlite+aiosqlite:////data/messenger.db
+      # The two instances live on the same loopback host.
+      FED_ALLOW_PRIVATE_NETWORKS: "1"
+    volumes:
+      - db_data_a:/data
+      - uploads_data_a:/app/uploads
+
+  server-b:
+    build: .
+    image: telecommunicator-api
+    container_name: telecommunicator-server-b
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      SECRET_KEY: ${SECRET_KEY_B:?set SECRET_KEY_B in a .env}
+      SERVER_ADDRESS: http://127.0.0.1:8011
+      PORT: 8011
+      DATABASE_URL: sqlite+aiosqlite:////data/messenger.db
+      # The two instances live on the same loopback host.
+      FED_ALLOW_PRIVATE_NETWORKS: "1"
+    volumes:
+      - db_data_b:/data
+      - uploads_data_b:/app/uploads
+
+volumes:
+  db_data_a:
+  uploads_data_a:
+  db_data_b:
+  uploads_data_b:

@@ -63,6 +63,12 @@ ru:
     apply: "Применить"
     restart_note: "Страница будет перезагружена"
 
+  theme:
+    title: "Тема оформления"
+    system: "Как в системе"
+    light: "Светлая"
+    dark: "Тёмная"
+
   chat_list:
     title: "Чаты"
     search: "Поиск чатов"
@@ -74,9 +80,6 @@ ru:
     refresh: "Обновить"
     profile: "Профиль"
     logout: "Выйти"
-    loading: "Загрузка чатов…"
-    loaded: "Загружено %{total} чатов"
-    error_loading: "Ошибка загрузки: %{exc}"
     no_personal: "Нет личных чатов."
     no_groups: "Нет групповых чатов."
     no_public: "Нет публичных комнат."

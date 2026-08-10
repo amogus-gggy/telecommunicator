@@ -6,6 +6,8 @@ class UserProfile(BaseModel):
     username: str
     email: str
     display_name: str | None
+    server_name: str | None = None
+    is_remote: bool | None = False
 
     model_config = {"from_attributes": True}
 

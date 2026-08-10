@@ -6,6 +6,7 @@ from api.http_client import APIClient, ConflictError, ValidationError
 from localization import t
 from server_addr import build_api_urls, parse_handle
 from state import AppState, UserDTO
+from ui.theme import initials_avatar, primary_button, themed_field
 
 
 def _generate_keypairs():
@@ -18,48 +19,30 @@ def _generate_keypairs():
 
 
 def register_view(page: flet.Page, state: AppState) -> None:
-    page.bgcolor = "#f0f2f5"
+    page.bgcolor = flet.Colors.SURFACE_CONTAINER
     page.overlay.clear()
 
-    username_field = flet.TextField(
+    username_field = themed_field(
         label=t("register.username"),
         hint_text=t("register.username_hint"),
         autofocus=True,
-        bgcolor="#ffffff",
-        border_color="#e0e0e0",
-        color="#111b21",
     )
-    email_field = flet.TextField(
-        label=t("register.email"),
-        bgcolor="#ffffff",
-        border_color="#e0e0e0",
-        color="#111b21",
-    )
-    password_field = flet.TextField(
+    email_field = themed_field(label=t("register.email"))
+    password_field = themed_field(
         label=t("register.password"),
         password=True,
         can_reveal_password=True,
-        bgcolor="#ffffff",
-        border_color="#e0e0e0",
-        color="#111b21",
     )
 
-    username_error = flet.Text("", color="#ea4335", visible=False, size=12)
-    email_error = flet.Text("", color="#ea4335", visible=False, size=12)
-    password_error = flet.Text("", color="#ea4335", visible=False, size=12)
-    general_error = flet.Text("", color="#ea4335", visible=False)
+    username_error = flet.Text("", color=flet.Colors.ERROR, visible=False, size=12)
+    email_error = flet.Text("", color=flet.Colors.ERROR, visible=False, size=12)
+    password_error = flet.Text("", color=flet.Colors.ERROR, visible=False, size=12)
+    general_error = flet.Text("", color=flet.Colors.ERROR, visible=False)
 
-    submit_btn = flet.ElevatedButton(
-        t("register.submit"),
-        width=300,
-        style=flet.ButtonStyle(
-            bgcolor="#008069",
-            color="#ffffff",
-            shape=flet.RoundedRectangleBorder(radius=8),
-            padding=flet.padding.symmetric(vertical=16),
-        ),
+    submit_btn = primary_button(t("register.submit"), expand=True)
+    loading = flet.ProgressRing(
+        visible=False, width=20, height=20, color=flet.Colors.PRIMARY
     )
-    loading = flet.ProgressRing(visible=False, width=20, height=20, color="#008069")
 
     def _clear_errors() -> None:
         for txt in (username_error, email_error, password_error, general_error):
@@ -163,6 +146,7 @@ def register_view(page: flet.Page, state: AppState) -> None:
                 username=me["username"],
                 email=me["email"],
                 display_name=me.get("display_name"),
+                server_name=me.get("server_name") or "",
             )
             from views.chat_list_view import chat_list_view
 
@@ -222,48 +206,55 @@ def register_view(page: flet.Page, state: AppState) -> None:
         flet.Column(
             controls=[
                 flet.Container(expand=True),
-                flet.Card(
-                    content=flet.Container(
-                        content=flet.Column(
-                            controls=[
-                                flet.Icon(flet.Icons.CHAT, size=56, color="#008069"),
-                                flet.Text(
-                                    "Telecommunicator",
-                                    size=28,
-                                    weight=flet.FontWeight.BOLD,
-                                    color="#111b21",
-                                ),
-                                flet.Text(
-                                    t("register.subtitle"), size=14, color="#667781"
-                                ),
-                                flet.Divider(height=20, color=flet.Colors.TRANSPARENT),
-                                username_field,
-                                username_error,
-                                email_field,
-                                email_error,
-                                password_field,
-                                password_error,
-                                general_error,
-                                flet.Row(
-                                    controls=[submit_btn, loading],
-                                    alignment=flet.MainAxisAlignment.CENTER,
-                                    vertical_alignment=flet.CrossAxisAlignment.CENTER,
-                                ),
-                                flet.TextButton(
-                                    t("register.have_account"),
-                                    on_click=go_login,
-                                    style=flet.ButtonStyle(color="#008069"),
-                                ),
-                            ],
-                            alignment=flet.MainAxisAlignment.CENTER,
-                            horizontal_alignment=flet.CrossAxisAlignment.CENTER,
-                            width=320,
-                            spacing=12,
-                        ),
-                        padding=32,
+                flet.Container(
+                    content=flet.Column(
+                        controls=[
+                            initials_avatar("Telecommunicator", size=64),
+                            flet.Text(
+                                "Telecommunicator",
+                                size=26,
+                                weight=flet.FontWeight.BOLD,
+                                color=flet.Colors.ON_SURFACE,
+                            ),
+                            flet.Text(
+                                t("register.subtitle"),
+                                size=14,
+                                color=flet.Colors.ON_SURFACE_VARIANT,
+                            ),
+                            flet.Divider(height=20, color=flet.Colors.TRANSPARENT),
+                            username_field,
+                            username_error,
+                            email_field,
+                            email_error,
+                            password_field,
+                            password_error,
+                            general_error,
+                            flet.Row(
+                                controls=[submit_btn, loading],
+                                alignment=flet.MainAxisAlignment.CENTER,
+                                vertical_alignment=flet.CrossAxisAlignment.CENTER,
+                            ),
+                            flet.TextButton(
+                                t("register.have_account"),
+                                on_click=go_login,
+                                style=flet.ButtonStyle(color=flet.Colors.PRIMARY),
+                            ),
+                        ],
+                        alignment=flet.MainAxisAlignment.CENTER,
+                        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
+                        width=340,
+                        spacing=10,
                     ),
-                    elevation=2,
-                    bgcolor="#ffffff",
+                    padding=32,
+                    border_radius=20,
+                    bgcolor=flet.Colors.SURFACE,
+                    border=flet.border.all(1, flet.Colors.OUTLINE_VARIANT),
+                    shadow=flet.BoxShadow(
+                        blur_radius=24,
+                        spread_radius=-4,
+                        color="#1A000000",
+                        offset=flet.Offset(0, 8),
+                    ),
                 ),
                 flet.Container(expand=True),
             ],

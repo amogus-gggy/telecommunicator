@@ -9,6 +9,7 @@ import flet
 from localization import set_locale
 from state import AppState
 from storage.settings import LocalStorage
+from ui.theme import apply_theme
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,23 +30,6 @@ sys.path.insert(
 
 async def main(page: flet.Page) -> None:
     page.title = "Мессенджер"
-    page.theme_mode = flet.ThemeMode.LIGHT
-    page.fonts = {"RobotoFlex": "fonts/RobotoFlex.ttf"}
-    page.theme = flet.Theme(color_scheme_seed="#008069", font_family="RobotoFlex")
-    page.padding = 0
-
-    # Show a loading indicator immediately so the splash screen dismisses
-    loading = flet.Column(
-        controls=[
-            flet.ProgressRing(color="#008069"),
-            flet.Text("Загрузка...", color="#667781", size=14),
-        ],
-        alignment=flet.MainAxisAlignment.CENTER,
-        horizontal_alignment=flet.CrossAxisAlignment.CENTER,
-        expand=True,
-    )
-    page.add(loading)
-    page.update()
 
     try:
         try:
@@ -57,13 +41,33 @@ async def main(page: flet.Page) -> None:
         logger.info("[main] settings dir: %s", settings_dir)
 
         storage = LocalStorage(settings_dir)
-        
+
+        stored_theme = storage.get("settings.theme_mode") or "system"
+        apply_theme(page, stored_theme)
+
+        # Show a loading indicator immediately so the splash screen dismisses
+        page.add(
+            flet.Column(
+                controls=[
+                    flet.ProgressRing(color=flet.Colors.PRIMARY),
+                    flet.Text(
+                        "Загрузка...", color=flet.Colors.ON_SURFACE_VARIANT, size=14
+                    ),
+                ],
+                alignment=flet.MainAxisAlignment.CENTER,
+                horizontal_alignment=flet.CrossAxisAlignment.CENTER,
+                expand=True,
+            )
+        )
+        page.update()
+
         stored_api_url = storage.get("settings.api_url")
         stored_ws_url = storage.get("settings.ws_url")
         state = AppState(
             secure_storage=storage,
             api_url=stored_api_url or "",
             ws_url=stored_ws_url or "",
+            theme_mode=stored_theme,
         )
 
         stored_locale = storage.get("settings.locale") or "ru"
@@ -84,14 +88,19 @@ async def main(page: flet.Page) -> None:
         page.add(
             flet.Column(
                 controls=[
-                    flet.Icon(flet.Icons.ERROR_OUTLINE, color="#ea4335", size=48),
+                    flet.Icon(flet.Icons.ERROR_OUTLINE, color=flet.Colors.ERROR, size=48),
                     flet.Text(
                         "Ошибка запуска",
                         size=18,
                         weight=flet.FontWeight.BOLD,
-                        color="#111b21",
+                        color=flet.Colors.ON_SURFACE,
                     ),
-                    flet.Text(str(exc), size=12, color="#667781", selectable=True),
+                    flet.Text(
+                        str(exc),
+                        size=12,
+                        color=flet.Colors.ON_SURFACE_VARIANT,
+                        selectable=True,
+                    ),
                 ],
                 alignment=flet.MainAxisAlignment.CENTER,
                 horizontal_alignment=flet.CrossAxisAlignment.CENTER,

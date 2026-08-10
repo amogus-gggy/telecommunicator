@@ -1,5 +1,6 @@
 .kiro
 .venv
+.env
 .vs
 __pycache__
 .pytest_cache

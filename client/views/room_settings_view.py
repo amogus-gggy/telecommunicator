@@ -5,10 +5,11 @@ import flet
 from api.http_client import APIClient, ForbiddenError
 from localization import t
 from state import AppState
+from ui.theme import snack, surface_app_bar
 
 
 def room_settings_view(page: flet.Page, state: AppState) -> None:
-    page.bgcolor = "#f0f2f5"
+    page.bgcolor = flet.Colors.SURFACE_CONTAINER
     page.overlay.clear()
     room = state.active_room
 
@@ -22,20 +23,21 @@ def room_settings_view(page: flet.Page, state: AppState) -> None:
         or state.current_user is None
         or state.current_user.username != room.owner_username
     ):
-        page.snack_bar = flet.SnackBar(
-            flet.Text(t("room_settings.only_owner_access"), color="#ffffff"),
-            open=True,
-            bgcolor="#ea4335",
-        )
-        page.update()
+        snack(page, t("room_settings.only_owner_access"), ok=False)
         _go_back()
         return
 
     allow_invite_switch = flet.Switch(
-        label=t("room_settings.allow_invite"), value=room.allow_member_invite
+        label=t("room_settings.allow_invite"),
+        value=room.allow_member_invite,
+        active_color=flet.Colors.PRIMARY,
+        label_text_style=flet.TextStyle(color=flet.Colors.ON_SURFACE, size=15),
     )
     read_only_switch = flet.Switch(
-        label=t("room_settings.read_only"), value=room.read_only
+        label=t("room_settings.read_only"),
+        value=room.read_only,
+        active_color=flet.Colors.PRIMARY,
+        label_text_style=flet.TextStyle(color=flet.Colors.ON_SURFACE, size=15),
     )
 
     async def _on_allow_invite_change(e: flet.ControlEvent) -> None:
@@ -47,24 +49,13 @@ def room_settings_view(page: flet.Page, state: AppState) -> None:
             )
             room.allow_member_invite = updated.get("allow_member_invite", new_value)
             room.read_only = updated.get("read_only", room.read_only)
-            page.snack_bar = flet.SnackBar(
-                flet.Text(t("room_settings.permissions_updated"), color="#ffffff"),
-                open=True,
-                bgcolor="#008069",
-            )
-            page.update()
+            snack(page, t("room_settings.permissions_updated"))
         except ForbiddenError:
-            page.snack_bar = flet.SnackBar(
-                flet.Text(t("room_settings.only_owner_permissions"), color="#ffffff"),
-                open=True,
-                bgcolor="#ea4335",
-            )
+            snack(page, t("room_settings.only_owner_permissions"), ok=False)
             allow_invite_switch.value = not new_value
             page.update()
         except Exception as exc:
-            page.snack_bar = flet.SnackBar(
-                flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335"
-            )
+            snack(page, str(exc), ok=False)
             allow_invite_switch.value = not new_value
             page.update()
         finally:
@@ -79,24 +70,13 @@ def room_settings_view(page: flet.Page, state: AppState) -> None:
                 "allow_member_invite", room.allow_member_invite
             )
             room.read_only = updated.get("read_only", new_value)
-            page.snack_bar = flet.SnackBar(
-                flet.Text(t("room_settings.permissions_updated"), color="#ffffff"),
-                open=True,
-                bgcolor="#008069",
-            )
-            page.update()
+            snack(page, t("room_settings.permissions_updated"))
         except ForbiddenError:
-            page.snack_bar = flet.SnackBar(
-                flet.Text(t("room_settings.only_owner_permissions"), color="#ffffff"),
-                open=True,
-                bgcolor="#ea4335",
-            )
+            snack(page, t("room_settings.only_owner_permissions"), ok=False)
             read_only_switch.value = not new_value
             page.update()
         except Exception as exc:
-            page.snack_bar = flet.SnackBar(
-                flet.Text(str(exc), color="#ffffff"), open=True, bgcolor="#ea4335"
-            )
+            snack(page, str(exc), ok=False)
             read_only_switch.value = not new_value
             page.update()
         finally:
@@ -112,13 +92,13 @@ def room_settings_view(page: flet.Page, state: AppState) -> None:
                     t("room_settings.permissions"),
                     size=16,
                     weight=flet.FontWeight.W_600,
-                    color="#111b21",
+                    color=flet.Colors.ON_SURFACE,
                 ),
-                flet.Divider(height=8),
+                flet.Divider(height=8, color=flet.Colors.OUTLINE_VARIANT),
                 flet.Text(
                     t("room_settings.personal_auto"),
                     size=14,
-                    color="#667781",
+                    color=flet.Colors.ON_SURFACE_VARIANT,
                     italic=True,
                 ),
             ],
@@ -131,9 +111,9 @@ def room_settings_view(page: flet.Page, state: AppState) -> None:
                     t("room_settings.permissions"),
                     size=16,
                     weight=flet.FontWeight.W_600,
-                    color="#111b21",
+                    color=flet.Colors.ON_SURFACE,
                 ),
-                flet.Divider(height=8),
+                flet.Divider(height=8, color=flet.Colors.OUTLINE_VARIANT),
                 allow_invite_switch,
                 read_only_switch,
             ],
@@ -144,32 +124,17 @@ def room_settings_view(page: flet.Page, state: AppState) -> None:
     page.add(
         flet.Column(
             controls=[
-                flet.Container(
-                    content=flet.Row(
-                        controls=[
-                            flet.IconButton(
-                                icon=flet.Icons.ARROW_BACK,
-                                on_click=_go_back,
-                                tooltip=t("room_settings.back"),
-                                icon_color="#ffffff",
-                            ),
-                            flet.Text(
-                                t("room_settings.title", name=room.name),
-                                size=20,
-                                weight=flet.FontWeight.BOLD,
-                                color="#ffffff",
-                            ),
-                        ],
-                        vertical_alignment=flet.CrossAxisAlignment.CENTER,
-                    ),
-                    bgcolor="#008069",
-                    padding=flet.padding.symmetric(horizontal=8, vertical=8),
+                surface_app_bar(
+                    t("room_settings.title", name=room.name),
+                    on_back=_go_back,
                 ),
                 flet.Container(
-                    content=flet.Card(
-                        content=flet.Container(content=settings_content, padding=20),
-                        bgcolor="#ffffff",
-                        elevation=1,
+                    content=flet.Container(
+                        content=settings_content,
+                        padding=20,
+                        bgcolor=flet.Colors.SURFACE,
+                        border_radius=16,
+                        border=flet.border.all(1, flet.Colors.OUTLINE_VARIANT),
                     ),
                     padding=16,
                     expand=True,

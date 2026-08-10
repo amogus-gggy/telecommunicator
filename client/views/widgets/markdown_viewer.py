@@ -2,12 +2,14 @@ import flet as ft
 
 
 class MarkdownViewer(ft.Container):
-    def __init__(self, value: str = "", **kwargs):
+    def __init__(self, value: str = "", dark: bool = True, **kwargs):
         super().__init__(**kwargs)
         self._md = ft.Markdown(
             value=value,
             extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-            code_theme=ft.MarkdownCodeTheme.ATOM_ONE_DARK,
+            code_theme=ft.MarkdownCodeTheme.ATOM_ONE_DARK
+            if dark
+            else ft.MarkdownCodeTheme.GITHUB,
             selectable=True,
             soft_line_break=True,
             auto_follow_links=True,

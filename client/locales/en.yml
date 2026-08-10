@@ -63,6 +63,12 @@ en:
     apply: "Apply"
     restart_note: "The page will reload"
 
+  theme:
+    title: "Theme"
+    system: "System default"
+    light: "Light"
+    dark: "Dark"
+
   chat_list:
     title: "Chats"
     search: "Search chats"
@@ -74,9 +80,6 @@ en:
     refresh: "Refresh"
     profile: "Profile"
     logout: "Logout"
-    loading: "Loading chats…"
-    loaded: "Loaded %{total} chats"
-    error_loading: "Loading error: %{exc}"
     no_personal: "No personal chats."
     no_groups: "No group chats."
     no_public: "No public rooms."

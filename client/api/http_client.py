@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import urllib.parse
 from typing import Any
 
 import httpx
@@ -305,7 +306,8 @@ class APIClient:
     # ------------------------------------------------------------------
 
     async def get_public_keys(self, username: str) -> dict:
-        r = await self._get(f"/users/{username}/public-keys")
+        quoted = urllib.parse.quote(username, safe="")
+        r = await self._get(f"/users/{quoted}/public-keys")
         return r.json()
 
     async def update_public_keys(

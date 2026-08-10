@@ -2,14 +2,86 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.remote_room_link import RemoteRoomLink
 from app.models.room import Room, RoomType
 from app.models.room_member import RoomMember
 from app.models.user import User
 from app.schemas.rooms import PermissionUpdate, RoomCreate, RoomResponse
+from app.services.federation_service import (
+    SERVER_NAME,
+    ensure_server,
+    import_room_to_server,
+    resolve_user,
+    user_member_payload,
+)
 from app.ws.connection_manager import manager as ws_manager
 
 
-def _build_response(room: Room, owner_username: str, member_count: int) -> RoomResponse:
+async def _ensure_remote_mirrors(
+    db: AsyncSession, room: Room, members: list[User]
+) -> None:
+    """Create/refresh mirror rooms on the servers of all remote members.
+
+    Only meaningful for rooms hosted on this server (``room.server_name`` is the
+    local name). For each distinct remote homeserver among ``members``, we ask it
+    to import a mirror and remember the mapping so messages can be relayed later.
+    """
+    if room.server_name != SERVER_NAME:
+        return
+
+    remote_servers = {m.server_name for m in members if m.server_name != SERVER_NAME}
+    if not remote_servers:
+        return
+
+    # Reflect the full current roster on each remote server.
+    roster_result = await db.execute(
+        select(RoomMember).where(RoomMember.room_id == room.id)
+    )
+    roster_ids = [row.user_id for row in roster_result.scalars()]
+    roster = []
+    if roster_ids:
+        users_result = await db.execute(select(User).where(User.id.in_(roster_ids)))
+        roster = list(users_result.scalars())
+
+    for server_name in remote_servers:
+        server = await ensure_server(db, server_name)
+        body = {
+            "remote_room_id": room.id,
+            "name": room.name,
+            "room_type": room.room_type.value,
+            "is_private": room.is_private,
+            "members": [user_member_payload(u) for u in roster],
+        }
+        try:
+            mirror_id = await import_room_to_server(db, server, body)
+        except HTTPException:
+            # A remote that cannot be reached should not break membership locally.
+            continue
+
+        result = await db.execute(
+            select(RemoteRoomLink).where(
+                RemoteRoomLink.room_id == room.id,
+                RemoteRoomLink.server_name == server_name,
+            )
+        )
+        link = result.scalar_one_or_none()
+        if link is None:
+            db.add(
+                RemoteRoomLink(
+                    room_id=room.id, server_name=server_name, remote_room_id=mirror_id
+                )
+            )
+        else:
+            link.remote_room_id = mirror_id
+        await db.commit()
+
+
+def _build_response(
+    room: Room,
+    owner_username: str,
+    member_count: int,
+    participants: list[str] | None = None,
+) -> RoomResponse:
     return RoomResponse(
         id=room.id,
         name=room.name,
@@ -19,7 +91,17 @@ def _build_response(room: Room, owner_username: str, member_count: int) -> RoomR
         is_private=room.is_private,
         allow_member_invite=room.allow_member_invite,
         read_only=room.read_only,
+        server_name=room.server_name,
+        remote_room_id=room.remote_room_id,
+        participants=participants or [],
     )
+
+
+def _member_handle(user: User) -> str:
+    """Full ``username@server`` handle; bare username for local users."""
+    if user.server_name and user.server_name != SERVER_NAME:
+        return f"{user.username}@{user.server_name}"
+    return user.username
 
 
 async def _room_to_response(room: Room, db: AsyncSession) -> RoomResponse:
@@ -29,7 +111,17 @@ async def _room_to_response(room: Room, db: AsyncSession) -> RoomResponse:
         select(func.count()).where(RoomMember.room_id == room.id)
     )
     member_count = count_result.scalar_one()
-    return _build_response(room, owner.username if owner else "", member_count)
+    handle_result = await db.execute(
+        select(RoomMember.user_id).where(RoomMember.room_id == room.id)
+    )
+    member_ids = [row[0] for row in handle_result]
+    handles: list[str] = []
+    if member_ids:
+        users_result = await db.execute(select(User).where(User.id.in_(member_ids)))
+        handles = [_member_handle(u) for u in users_result.scalars()]
+    return _build_response(
+        room, owner.username if owner else "", member_count, participants=handles
+    )
 
 
 async def _rooms_to_responses(
@@ -54,8 +146,23 @@ async def _rooms_to_responses(
     )
     count_map: dict[int, int] = {row.room_id: row.cnt for row in count_rows}
 
+    # Single query for all member handles (username / username@server)
+    handle_rows = await db.execute(
+        select(RoomMember.room_id, User)
+        .join(User, User.id == RoomMember.user_id)
+        .where(RoomMember.room_id.in_(room_ids))
+    )
+    handle_map: dict[int, list[str]] = {}
+    for room_id, user in handle_rows:
+        handle_map.setdefault(room_id, []).append(_member_handle(user))
+
     return [
-        _build_response(r, owner_map.get(r.owner_id, ""), count_map.get(r.id, 0))
+        _build_response(
+            r,
+            owner_map.get(r.owner_id, ""),
+            count_map.get(r.id, 0),
+            participants=handle_map.get(r.id, []),
+        )
         for r in rooms
     ]
 
@@ -81,7 +188,7 @@ async def create_room(data: RoomCreate, owner: User, db: AsyncSession) -> RoomRe
     await db.commit()
     await db.refresh(room)
 
-    return _build_response(room, owner.username, 1)
+    return await _room_to_response(room, db)
 
 
 async def list_public_rooms(db: AsyncSession) -> list[RoomResponse]:
@@ -187,6 +294,8 @@ async def leave_room(room_id: int, user: User, db: AsyncSession) -> RoomResponse
     await db.delete(member)
     await db.commit()
 
+    await ws_manager.revoke_access(user.id, room_id)
+
     return await _room_to_response(room, db)
 
 
@@ -211,10 +320,8 @@ async def invite_user(
                 status_code=403, detail="Members are not allowed to invite in this room"
             )
 
-    target_result = await db.execute(select(User).where(User.username == username))
-    target = target_result.scalar_one_or_none()
-    if target is None:
-        raise HTTPException(status_code=404, detail="User not found")
+    # Target may be a remote user (username@server).
+    target = await resolve_user(db, username)
 
     existing = await db.execute(
         select(RoomMember).where(
@@ -224,6 +331,9 @@ async def invite_user(
     if existing.scalar_one_or_none() is None:
         db.add(RoomMember(room_id=room_id, user_id=target.id))
         await db.commit()
+
+    # If we host this room, make sure remote members get a mirror.
+    await _ensure_remote_mirrors(db, room, [requester, target])
 
     response = await _room_to_response(room, db)
 
@@ -257,10 +367,8 @@ async def remove_member(
     if room.owner_id != requester.id:
         raise HTTPException(status_code=403, detail="Only the owner can remove members")
 
-    target_result = await db.execute(select(User).where(User.username == username))
-    target = target_result.scalar_one_or_none()
-    if target is None:
-        raise HTTPException(status_code=404, detail="User not found")
+    # Target may be a remote user (username@server).
+    target = await resolve_user(db, username)
 
     if target.id == room.owner_id:
         raise HTTPException(
@@ -278,6 +386,8 @@ async def remove_member(
 
     await db.delete(member)
     await db.commit()
+
+    await ws_manager.revoke_access(target.id, room_id)
 
     return await _room_to_response(room, db)
 
@@ -309,13 +419,8 @@ async def create_personal_chat(
     target_username: str, requester: User, db: AsyncSession
 ) -> RoomResponse:
     """Создает или находит существующий личный чат между двумя пользователями."""
-    # Найти целевого пользователя
-    target_result = await db.execute(
-        select(User).where(User.username == target_username)
-    )
-    target = target_result.scalar_one_or_none()
-    if target is None:
-        raise HTTPException(status_code=404, detail="User not found")
+    # Target may be a remote user (username@server).
+    target = await resolve_user(db, target_username)
 
     if target.id == requester.id:
         raise HTTPException(
@@ -338,7 +443,7 @@ async def create_personal_chat(
     if existing_room:
         return await _room_to_response(existing_room, db)
 
-    # Создать новый личный чат
+    # Создать новый личный чат (hosted on the requester's server).
     chat_name = f"{requester.username}, {target.username}"
     room = Room(
         name=chat_name,
@@ -347,6 +452,8 @@ async def create_personal_chat(
         is_private=True,
         allow_member_invite=False,
         read_only=False,
+        server_name=SERVER_NAME,
+        remote_room_id=None,
     )
     db.add(room)
     await db.flush()
@@ -358,7 +465,10 @@ async def create_personal_chat(
     await db.commit()
     await db.refresh(room)
 
-    return _build_response(room, requester.username, 2)
+    # Create mirror rooms for remote participants.
+    await _ensure_remote_mirrors(db, room, [requester, target])
+
+    return await _room_to_response(room, db)
 
 
 async def get_user_chats(user: User, db: AsyncSession) -> list[RoomResponse]:

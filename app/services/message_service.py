@@ -1,4 +1,7 @@
+import asyncio
 import base64
+import logging
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -15,10 +18,296 @@ from app.schemas.messages import (
     MessageResponse,
     SendMessageResponse,
 )  # MessageResponse now includes 'files'
+from app.services.federation_service import (
+    SERVER_NAME,
+    ensure_server,
+    resolve_user,
+    send_room_message,
+)
 from app.ws.connection_manager import manager
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_PAGE_SIZE = 50
 _MAX_PAGE_SIZE = 200
+
+# Outbound relay retries (seconds: 0.5, 1, 2).
+_RELAY_ATTEMPTS = 3
+_RELAY_BACKOFF_BASE_SECONDS = 0.5
+
+
+def _new_event_id() -> str:
+    return uuid.uuid4().hex
+
+
+def _relay_payload(
+    *,
+    author: User,
+    body: str | None = None,
+    encrypted_blob: bytes | None = None,
+    sender_encrypted_blob: bytes | None = None,
+    signature: bytes | None = None,
+    recipient: User | None = None,
+    is_encrypted: bool = False,
+    created_at: datetime | None = None,
+    event_id: str | None = None,
+) -> dict:
+    return {
+        "event_id": event_id or _new_event_id(),
+        "body": body,
+        "is_encrypted": is_encrypted,
+        "encrypted_blob": base64.b64encode(encrypted_blob).decode()
+        if encrypted_blob
+        else None,
+        "sender_encrypted_blob": base64.b64encode(sender_encrypted_blob).decode()
+        if sender_encrypted_blob
+        else None,
+        "signature": base64.b64encode(signature).decode() if signature else None,
+        "recipient": (
+            {"username": recipient.username, "server_name": recipient.server_name}
+            if recipient
+            else None
+        ),
+        "created_at": (created_at or datetime.now(timezone.utc)).isoformat(),
+    }
+
+
+def _sender_member(user: User) -> dict:
+    return {
+        "username": user.username,
+        "server_name": user.server_name,
+        "display_name": user.display_name,
+    }
+
+
+def _author_handle(user: User | None) -> str:
+    """Full ``username@server`` handle for remote authors, bare name for local."""
+    if user is None:
+        return ""
+    if user.server_name and user.server_name != SERVER_NAME:
+        return f"{user.username}@{user.server_name}"
+    return user.username
+
+
+async def _persist_payload_message(
+    db: AsyncSession,
+    room: Room,
+    author: User,
+    payload: dict,
+) -> Message:
+    def _b64(value: str | None) -> bytes | None:
+        if not value:
+            return None
+        try:
+            return base64.b64decode(value)
+        except Exception:
+            return None
+
+    # Idempotency: the same (room, event_id) must never be persisted twice, even
+    # if a retry or a redelivery from the outbox re-sends it.
+    event_id = payload.get("event_id")
+    if event_id:
+        existing = await db.execute(
+            select(Message).where(
+                Message.room_id == room.id, Message.event_id == event_id
+            )
+        )
+        existing_msg = existing.scalar_one_or_none()
+        if existing_msg is not None:
+            return existing_msg
+
+    # Author-created timestamp wins over the mirror's local clock so ordering by
+    # created_at stays consistent across servers.
+    created_at = None
+    raw_created = payload.get("created_at")
+    if isinstance(raw_created, str):
+        try:
+            created_at = datetime.fromisoformat(raw_created.replace("Z", "+00:00"))
+        except ValueError:
+            created_at = None
+
+    recipient_row = None
+    receiver = payload.get("recipient")
+    if receiver:
+        try:
+            recipient_row = await resolve_user(
+                db, f"{receiver['username']}@{receiver['server_name']}"
+            )
+        except HTTPException:
+            recipient_row = None
+
+    is_encrypted = bool(payload.get("is_encrypted"))
+    msg = Message(
+        room_id=room.id,
+        author_id=author.id,
+        body=payload.get("body") if not is_encrypted else None,
+        is_encrypted=is_encrypted,
+        encrypted_blob=_b64(payload.get("encrypted_blob")),
+        sender_encrypted_blob=_b64(payload.get("sender_encrypted_blob")),
+        signature=_b64(payload.get("signature")),
+        recipient_id=recipient_row.id if recipient_row else None,
+        event_id=event_id,
+        created_at=created_at or datetime.now(timezone.utc),
+    )
+    db.add(msg)
+    await db.commit()
+    await db.refresh(msg)
+    return msg
+
+
+async def _broadcast_payload(
+    db: AsyncSession, room: Room, author: User, msg: Message, payload: dict
+) -> None:
+    is_encrypted = bool(payload.get("is_encrypted"))
+    author_handle = _author_handle(author)
+    if is_encrypted:
+        await manager.broadcast(
+            room.id,
+            {
+                "type": "encrypted_message",
+                "payload": {
+                    "message_id": msg.id,
+                    "sender_id": author.id,
+                    "sender_username": author_handle,
+                    "room_id": room.id,
+                    "encrypted_blob": payload.get("encrypted_blob"),
+                    "sender_encrypted_blob": payload.get("sender_encrypted_blob"),
+                    "signature": payload.get("signature"),
+                    "is_encrypted": True,
+                    "created_at": msg.created_at.isoformat(),
+                    "files": [],
+                },
+            },
+        )
+        return
+
+    await manager.broadcast(
+        room.id,
+        {
+            "type": "message",
+            "payload": {
+                "id": msg.id,
+                "room_id": room.id,
+                "author_username": author_handle,
+                "author_display_name": author.display_name,
+                "body": payload.get("body"),
+                "created_at": msg.created_at.isoformat(),
+                "files": [],
+            },
+        },
+    )
+
+
+async def store_and_relay(
+    db: AsyncSession,
+    room: Room,
+    author: User,
+    payload: dict,
+) -> Message:
+    """Persist a message locally, broadcast it to this server's sockets, then
+    relay it to the appropriate remote homeservers.
+
+    Rules (avoid loops/duplicates):
+    * If ``room`` is hosted here, fan out to every mirror server except the
+      author's own server (which already stored it).
+    * If ``room`` is a mirror hosted elsewhere, relay to the host only when the
+      author is a local user (remote-authored messages arrived via relay and
+      must not be sent back).
+    """
+    msg = await _persist_payload_message(db, room, author, payload)
+    await _broadcast_payload(db, room, author, msg, payload)
+    await _relay_message(db, room, author, payload)
+    return msg
+
+
+async def _deliver_to_mirror(
+    db: AsyncSession,
+    room: Room,
+    link,
+    sender_member: dict,
+    payload: dict,
+) -> None:
+    """Deliver a relayed message to one mirror, retrying and queueing failures.
+
+    Transient failures are retried with exponential back-off; if every attempt
+    fails the event is recorded in the durable outbox (``federation_outbox``)
+    for later redelivery instead of being silently swallowed.
+    """
+    from app.services.federation_service import enqueue_outbox_message
+
+    last_error = "unknown federation error"
+    for attempt in range(_RELAY_ATTEMPTS):
+        try:
+            server = await ensure_server(db, link.server_name)
+            await send_room_message(
+                db, server, link.remote_room_id, sender_member, payload
+            )
+            return
+        except HTTPException as exc:
+            last_error = str(exc.detail)
+            if attempt < _RELAY_ATTEMPTS - 1:
+                await asyncio.sleep(_RELAY_BACKOFF_BASE_SECONDS * (2**attempt))
+
+    try:
+        await enqueue_outbox_message(
+            db,
+            room_id=room.id,
+            remote_room_id=link.remote_room_id,
+            server_name=link.server_name,
+            event_id=payload.get("event_id"),
+            sender_member=sender_member,
+            payload=payload,
+            error=last_error,
+        )
+    except Exception as exc:  # Outbox persistence must not mask the failure.
+        logger.error(
+            "[Federation] Failed to queue undelivered relay for %s: %s",
+            link.server_name,
+            exc,
+        )
+    logger.error(
+        "[Federation] Relay of %s to %s (room %s) failed after %d attempts: %s",
+        payload.get("event_id"),
+        link.server_name,
+        link.remote_room_id,
+        _RELAY_ATTEMPTS,
+        last_error,
+    )
+
+
+async def _relay_message(
+    db: AsyncSession, room: Room, author: User, payload: dict
+) -> None:
+    from app.models.remote_room_link import RemoteRoomLink
+
+    is_host = room.server_name == SERVER_NAME
+    sender_member = _sender_member(author)
+
+    if is_host:
+        # Fan out to every mirrored server except the author's own.
+        result = await db.execute(
+            select(RemoteRoomLink).where(RemoteRoomLink.room_id == room.id)
+        )
+        links = result.scalars().all()
+        for link in links:
+            if link.server_name == author.server_name:
+                continue
+            await _deliver_to_mirror(db, room, link, sender_member, payload)
+        return
+
+    # Mirror room: forward local author messages to the host.
+    if sender_member["server_name"] == SERVER_NAME:
+        await _deliver_to_mirror(
+            db,
+            room,
+            RemoteRoomLink(
+                room_id=room.id,
+                server_name=room.server_name,
+                remote_room_id=room.remote_room_id,
+            ),
+            sender_member,
+            payload,
+        )
 
 
 async def send_message(
@@ -64,6 +353,7 @@ async def send_message(
 
     # Persist Message
     msg = Message(room_id=room_id, author_id=author.id, body=body)
+    msg.event_id = _new_event_id()
     db.add(msg)
     await db.commit()
     await db.refresh(msg)  # Refresh to get msg.id
@@ -150,6 +440,17 @@ async def send_message(
     )
     print(f"[SEND_MESSAGE] Broadcast completed for message {response.id}")
 
+    # Federated delivery: fan out to remote mirrors / forward to the host.
+    try:
+        await _relay_message(
+            db,
+            room,
+            author,
+            _relay_payload(author=author, body=body, event_id=msg.event_id),
+        )
+    except HTTPException:
+        pass  # Single-server operation must not fail because of a remote.
+
     return response
 
 
@@ -195,13 +496,14 @@ async def get_message_history(
     message_responses = []
     for msg_orm, author_orm in rows_with_details:
         message_files = []
+        author_handle = _author_handle(author_orm)
         if msg_orm.files:
             message_files = [
                 {
                     "id": f.id,
                     "filename": f.filename,
                     "uploader_id": f.uploader_id,
-                    "uploader_username": author_orm.username,
+                    "uploader_username": author_handle,
                     "room_id": f.room_id,
                     "created_at": f.created_at.isoformat(),
                     "is_encrypted": f.is_encrypted,
@@ -216,7 +518,7 @@ async def get_message_history(
             MessageResponse(
                 id=msg_orm.id,
                 room_id=msg_orm.room_id,
-                author_username=author_orm.username,
+                author_username=author_handle,
                 author_display_name=author_orm.display_name,
                 body=msg_orm.body,
                 is_encrypted=msg_orm.is_encrypted,
@@ -251,11 +553,12 @@ async def send_encrypted_message(
     file_ids: list[int] | None = None,
 ) -> SendMessageResponse:
     """Persist and deliver an E2EE message. Raises HTTPException on failure."""
-    # 1. Resolve recipient by username
-    result = await db.execute(select(User).where(User.username == recipient_username))
-    recipient = result.scalar_one_or_none()
-    if recipient is None:
-        raise HTTPException(status_code=404, detail="Recipient not found")
+    # 1. Resolve recipient by username (supports user@server handles)
+    recipient = await resolve_user(db, recipient_username)
+    sender_result = await db.execute(select(User).where(User.id == sender_id))
+    sender = sender_result.scalar_one_or_none()
+    if sender is None:
+        raise HTTPException(status_code=404, detail="Sender not found")
 
     # 2. Verify sender is a member of the room
     membership = await db.execute(
@@ -276,6 +579,7 @@ async def send_encrypted_message(
         recipient_id=recipient.id,
         is_encrypted=True,
     )
+    msg.event_id = _new_event_id()
     db.add(msg)
     await db.commit()
     await db.refresh(msg)
@@ -297,7 +601,7 @@ async def send_encrypted_message(
         # Also look up sender username for the client
         sender_result = await db.execute(select(User).where(User.id == sender_id))
         sender = sender_result.scalar_one_or_none()
-        sender_username = sender.username if sender else str(sender_id)
+        sender_username = _author_handle(sender)
 
         # Load associated files for the WS payload
         from app.models.file import File
@@ -353,6 +657,26 @@ async def send_encrypted_message(
     if delivered:
         msg.delivered_at = datetime.now(timezone.utc)
         await db.commit()
+
+    # Federated delivery: fan out to remote mirrors / forward to the host so a
+    # recipient on another server can receive this encrypted message.
+    try:
+        await _relay_message(
+            db,
+            room=await db.get(Room, room_id),
+            author=sender,
+            payload=_relay_payload(
+                author=sender,
+                encrypted_blob=encrypted_blob,
+                sender_encrypted_blob=sender_encrypted_blob,
+                signature=signature,
+                recipient=recipient,
+                is_encrypted=True,
+                event_id=msg.event_id,
+            ),
+        )
+    except Exception:
+        pass
 
     return SendMessageResponse(
         message_id=msg.id,
