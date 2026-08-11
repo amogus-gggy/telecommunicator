@@ -4,6 +4,7 @@ from crypto.key_generator import KeyGenerator
 from crypto.message_store import PlaintextMessageStore, get_message_store
 from crypto.ratchet_facade import RatchetDecryptor, RatchetEncryptor
 from crypto.ratchet_session_store import RatchetSessionStore, get_session_store
+from crypto.sender_keys import GroupSenderKeyManager, get_sender_key_manager, peek_group_blob_version
 
 __all__ = [
     "KeyGenerator",

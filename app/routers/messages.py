@@ -13,12 +13,14 @@ from app.schemas.messages import (
     EncryptedMessageResponse,
     MessageResponse,
     SendEncryptedMessageRequest,
+    SendGroupEncryptedMessageRequest,
     SendMessageResponse,
 )
 from app.services.message_service import (
     _author_handle,
     get_message_history,
     send_encrypted_message,
+    send_group_encrypted_message,
 )
 
 router = APIRouter(tags=["messages"])
@@ -64,6 +66,22 @@ async def send_message_encrypted(
         signature_bytes,
         file_ids=body.file_ids,
     )
+
+
+@router.post("/messages/group", response_model=SendMessageResponse, status_code=201)
+async def send_group_message_encrypted(
+    body: SendGroupEncryptedMessageRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SendMessageResponse:
+    if not body.encrypted_blob or not body.signature:
+        raise HTTPException(status_code=400, detail="encrypted_blob and signature required")
+    try:
+        blob = base64.b64decode(body.encrypted_blob)
+        sig = base64.b64decode(body.signature)
+    except Exception:
+        raise HTTPException(status_code=400, detail="not valid base64")
+    return await send_group_encrypted_message(db, current_user.id, body.room_id, blob, sig, file_ids=body.file_ids)
 
 
 @router.get("/messages", response_model=list[EncryptedMessageResponse])

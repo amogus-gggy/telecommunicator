@@ -748,21 +748,30 @@ def room_view(page: flet.Page, state: AppState) -> None:
             logging.info(f"[DECRYPT] Decrypting message from {sender_username}")
             encrypted_data = {"blob": encrypted_blob, "signature": signature}
 
-            if peek_blob_version(encrypted_blob) >= 2:
-                plaintext = RatchetDecryptor().decrypt_message(
-                    encrypted_data,
-                    peer_key=sender_username,
-                    recipient_x25519_priv=state.x25519_private,
-                    sender_ed25519_pub=sender_keys["ed25519_pub"],
-                    sender_x25519_pub=sender_keys["x25519_pub"],
-                    store=get_session_store(state),
-                )
-            else:
-                plaintext = MessageDecryptor().decrypt_message(
-                    encrypted_msg=encrypted_data,
-                    recipient_x25519_priv=state.x25519_private,
-                    sender_ed25519_pub=sender_keys["ed25519_pub"],
-                )
+            # group sender-key blob has priority (v3)
+            try:
+                from crypto.sender_keys import get_sender_key_manager, peek_group_blob_version
+                if peek_group_blob_version(encrypted_blob) == 3:
+                    mgr = get_sender_key_manager(state)
+                    plaintext = mgr.decrypt(encrypted_blob, signature, sender_keys["ed25519_pub"])
+                elif peek_blob_version(encrypted_blob) >= 2:
+                    plaintext = RatchetDecryptor().decrypt_message(
+                        encrypted_data,
+                        peer_key=sender_username,
+                        recipient_x25519_priv=state.x25519_private,
+                        sender_ed25519_pub=sender_keys["ed25519_pub"],
+                        sender_x25519_pub=sender_keys["x25519_pub"],
+                        store=get_session_store(state),
+                    )
+                else:
+                    plaintext = MessageDecryptor().decrypt_message(
+                        encrypted_msg=encrypted_data,
+                        recipient_x25519_priv=state.x25519_private,
+                        sender_ed25519_pub=sender_keys["ed25519_pub"],
+                    )
+            except Exception:
+                # if group decrypt raised ValueError for unknown chain, re-raise to outer handler
+                raise
 
             msg["body"] = plaintext
             msg["decrypted"] = True
@@ -801,6 +810,43 @@ def room_view(page: flet.Page, state: AppState) -> None:
             msg["body"] = t("room.encrypted_error", exc=exc)
             msg["decryption_error"] = True
             return msg
+
+    # -- group sender-key decrypt helper (inserted before _on_ws_message) --
+    async def _decrypt_group_message(msg: dict) -> dict:
+        """Try group sender-key decrypt for v3 blobs."""
+        try:
+            if not state.ed25519_private:
+                return msg
+            blob_b64 = msg.get("encrypted_blob") or ""
+            sig_b64 = msg.get("signature") or ""
+            if not blob_b64 or not sig_b64:
+                return msg
+            from crypto.sender_keys import get_sender_key_manager, peek_group_blob_version
+            from crypto.key_generator import KeyGenerator
+            if peek_group_blob_version(blob_b64) != 3:
+                return None  # not group
+            # need sender pub for verify
+            sender_username = msg.get("author_username") or ""
+            sender_keys = state.public_key_cache.get_public_keys(sender_username) if state.public_key_cache else None
+            if not sender_keys:
+                client2 = APIClient(state=state)
+                try:
+                    kd = await client2.get_public_keys(sender_username)
+                    ed_pub = KeyGenerator.load_ed25519_public_key(base64.b64decode(kd["identity_pub_ed25519"]))
+                    x_pub = KeyGenerator.load_x25519_public_key(base64.b64decode(kd["identity_pub_x25519"]))
+                    sender_keys = {"ed25519_pub": ed_pub}
+                    if state.public_key_cache:
+                        state.public_key_cache.set_public_keys(sender_username, ed_pub, x_pub)
+                finally:
+                    await client2.aclose()
+            mgr = get_sender_key_manager(state)
+            pt = mgr.decrypt(blob_b64, sig_b64, sender_keys["ed25519_pub"])
+            msg["body"] = pt
+            msg["decrypted"] = True
+            return msg
+        except Exception as e:
+            # unknown chain -> maybe need seed; caller handles fallback
+            return None
 
     def _on_ws_message(payload: dict) -> None:
         print(f"[WS] Received raw payload: {payload}")  # Log raw payload
@@ -1282,7 +1328,29 @@ def room_view(page: flet.Page, state: AppState) -> None:
                         )
                         should_encrypt = True
 
-                if should_encrypt and recipient_username:
+                is_group = room.room_type in ("group", "public")
+                if is_group and state.ed25519_private:
+                    # Group E2EE via sender keys (rotation every 100)
+                    try:
+                        from crypto.sender_keys import get_sender_key_manager
+                        mgr = get_sender_key_manager(state)
+                        enc = mgr.encrypt(room.id, resolved_body, str(state.current_user.id), state.ed25519_private)
+                        await client.send_group_encrypted_message(
+                            room_id=room.id,
+                            encrypted_blob_b64=enc["blob"],
+                            signature_b64=enc["signature"],
+                            file_ids=[f["id"] for f in uploaded_files if f.get("id")],
+                        )
+                    except Exception as enc_exc:
+                        import logging
+                        logging.error(f"[SEND] Group encryption failed: {enc_exc}", exc_info=True)
+                        if _state["messages_data"] and _state["messages_data"][-1].get("is_optimistic"):
+                            _state["messages_data"].pop()
+                            if messages_list.controls:
+                                messages_list.controls.pop()
+                        snack(page, t("room.send_error", exc=enc_exc), ok=False)
+                        return
+                elif should_encrypt and recipient_username:
                     try:
                         import base64
                         import logging

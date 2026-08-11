@@ -542,6 +542,71 @@ async def get_message_history(
     return message_responses
 
 
+async def send_group_encrypted_message(
+    db: AsyncSession,
+    sender_id: int,
+    room_id: int,
+    encrypted_blob: bytes,
+    signature: bytes,
+    file_ids: list[int] | None = None,
+) -> SendMessageResponse:
+    """Persist and broadcast a group E2EE (sender-key) message."""
+    sender_result = await db.execute(select(User).where(User.id == sender_id))
+    sender = sender_result.scalar_one_or_none()
+    if sender is None:
+        raise HTTPException(status_code=404, detail="Sender not found")
+
+    room = await db.get(Room, room_id)
+    if room is None:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    membership = await db.execute(
+        select(RoomMember).where(RoomMember.room_id == room_id, RoomMember.user_id == sender_id)
+    )
+    if membership.scalar_one_or_none() is None:
+        raise HTTPException(status_code=403, detail="Not a member of this room")
+
+    msg = Message(
+        room_id=room_id,
+        author_id=sender_id,
+        encrypted_blob=encrypted_blob,
+        signature=signature,
+        is_encrypted=True,
+        recipient_id=None,
+    )
+    msg.event_id = _new_event_id()
+    db.add(msg)
+    await db.commit()
+    await db.refresh(msg)
+
+    if file_ids:
+        from app.models.file import File
+        for fid in file_ids:
+            f = await db.get(File, fid)
+            if f and f.room_id == room_id:
+                f.message_id = msg.id
+        await db.commit()
+        await db.refresh(msg)
+
+    # broadcast to all room members via WS
+    payload = _relay_payload(
+        author=sender,
+        encrypted_blob=encrypted_blob,
+        signature=signature,
+        is_encrypted=True,
+        event_id=msg.event_id,
+    )
+    # need room object for broadcast
+    await _broadcast_payload(db, room, sender, msg, payload)
+    # federation relay
+    try:
+        await _relay_message(db, room, sender, payload)
+    except Exception:
+        pass
+
+    return SendMessageResponse(message_id=msg.id, created_at=msg.created_at, delivered=True)
+
+
 async def send_encrypted_message(
     db: AsyncSession,
     sender_id: int,

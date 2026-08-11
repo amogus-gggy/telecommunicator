@@ -362,6 +362,22 @@ class APIClient:
             r = await self._post("/messages", json=payload, timeout=timeout)
         return r.json()
 
+    async def send_group_encrypted_message(
+        self,
+        room_id: int,
+        encrypted_blob_b64: str,
+        signature_b64: str,
+        file_ids: list[int] | None = None,
+    ) -> dict:
+        payload = {
+            "room_id": room_id,
+            "encrypted_blob": encrypted_blob_b64,
+            "signature": signature_b64,
+            "file_ids": file_ids or [],
+        }
+        r = await self._post("/messages/group", json=payload)
+        return r.json()
+
     async def get_encrypted_messages(
         self, room_id: int | None = None, since: str | None = None
     ) -> list[dict]:

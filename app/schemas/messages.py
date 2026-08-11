@@ -28,6 +28,13 @@ class SendEncryptedMessageRequest(BaseModel):
     file_ids: list[int] = []
 
 
+class SendGroupEncryptedMessageRequest(BaseModel):
+    room_id: int
+    encrypted_blob: str
+    signature: str
+    file_ids: list[int] = []
+
+
 class SendMessageResponse(BaseModel):
     message_id: int
     created_at: datetime
