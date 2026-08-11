@@ -2,7 +2,7 @@
 
 > A self-hosted messenger with end-to-end encryption (E2EE) for messages and files. Built with FastAPI backend and Flet-based client for cross-platform support (mobile & desktop).
 
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-green)](https://www.python.org/downloads/)
 [![Status](https://img.shields.io/badge/Status-Active_Development-orange)](#support)
 
