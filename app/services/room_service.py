@@ -12,6 +12,7 @@ from app.services.federation_service import (
     ensure_server,
     import_room_to_server,
     resolve_user,
+    send_membership_event,
     user_member_payload,
 )
 from app.ws.connection_manager import manager as ws_manager
@@ -102,6 +103,74 @@ def _member_handle(user: User) -> str:
     if user.server_name and user.server_name != SERVER_NAME:
         return f"{user.username}@{user.server_name}"
     return user.username
+
+
+async def _notify_roster_change(
+    db: AsyncSession,
+    room: Room,
+    changed: User,
+    event_type: str,
+    *,
+    exclude_ids: set[int] | None = None,
+    include_ids: list[int] | None = None,
+) -> None:
+    """Tell room members the roster changed (join/leave/remove).
+
+    Group E2EE clients rely on this to rotate their sender keys. The payload
+    carries the full ``user@server`` handle.
+    """
+    frame = {
+        "type": event_type,
+        "payload": {
+            "room_id": room.id,
+            "room_name": room.name,
+            "username": _member_handle(changed),
+        },
+    }
+    if event_type == "member_joined":
+        member_row = await db.execute(
+            select(RoomMember).where(
+                RoomMember.room_id == room.id, RoomMember.user_id == changed.id
+            )
+        )
+        member = member_row.scalar_one_or_none()
+        if member is not None and member.joined_at is not None:
+            frame["payload"]["joined_at"] = member.joined_at.isoformat()
+    result = await db.execute(
+        select(RoomMember.user_id).where(RoomMember.room_id == room.id)
+    )
+    targets = {row[0] for row in result}
+    if exclude_ids:
+        targets -= exclude_ids
+    if include_ids:
+        targets |= set(include_ids)
+    for user_id in targets:
+        try:
+            await ws_manager.send_to_user(user_id, frame)
+        except Exception:
+            # Notification failure must not block the membership operation.
+            pass
+
+
+async def _relay_membership_event(
+    db: AsyncSession, room: Room, event: str, member: User
+) -> None:
+    """Push an add/remove to every mirror of a locally-hosted room."""
+    if room.server_name != SERVER_NAME:
+        return
+    result = await db.execute(
+        select(RemoteRoomLink).where(RemoteRoomLink.room_id == room.id)
+    )
+    for link in result.scalars():
+        try:
+            server = await ensure_server(db, link.server_name)
+            await send_membership_event(
+                db, server, link.remote_room_id, event, user_member_payload(member)
+            )
+        except HTTPException:
+            # A mirror that is momentarily unreachable must not break the
+            # local operation; a full roster re-import heals the drift.
+            continue
 
 
 async def _room_to_response(room: Room, db: AsyncSession) -> RoomResponse:
@@ -232,41 +301,10 @@ async def join_room(room_id: int, user: User, db: AsyncSession) -> RoomResponse:
 
     # Send first-time join notification to existing members
     if is_first_time_join:
-        # Query all existing members excluding the new joiner
-        members_result = await db.execute(
-            select(RoomMember).where(
-                RoomMember.room_id == room_id,
-                RoomMember.user_id != user.id,
-            )
+        await _notify_roster_change(
+            db, room, user, "member_joined", exclude_ids={user.id}
         )
-        existing_members = members_result.scalars().all()
-
-        # Get the new member's join timestamp
-        new_member_result = await db.execute(
-            select(RoomMember).where(
-                RoomMember.room_id == room_id,
-                RoomMember.user_id == user.id,
-            )
-        )
-        new_member = new_member_result.scalar_one()
-
-        for member in existing_members:
-            try:
-                await ws_manager.send_to_user(
-                    member.user_id,
-                    {
-                        "type": "member_joined",
-                        "payload": {
-                            "room_id": room_id,
-                            "room_name": room.name,
-                            "username": user.username,
-                            "joined_at": new_member.joined_at.isoformat(),
-                        },
-                    },
-                )
-            except Exception:
-                # Notification failure must not block the join operation
-                pass
+        await _relay_membership_event(db, room, "add", user)
 
     return await _room_to_response(room, db)
 
@@ -295,6 +333,11 @@ async def leave_room(room_id: int, user: User, db: AsyncSession) -> RoomResponse
     await db.commit()
 
     await ws_manager.revoke_access(user.id, room_id)
+
+    # Remaining members must rotate group sender keys after a leave.
+    if room.room_type in ("group", "public"):
+        await _notify_roster_change(db, room, user, "member_left")
+    await _relay_membership_event(db, room, "remove", user)
 
     return await _room_to_response(room, db)
 
@@ -328,7 +371,8 @@ async def invite_user(
             RoomMember.room_id == room_id, RoomMember.user_id == target.id
         )
     )
-    if existing.scalar_one_or_none() is None:
+    newly_added = existing.scalar_one_or_none() is None
+    if newly_added:
         db.add(RoomMember(room_id=room_id, user_id=target.id))
         await db.commit()
 
@@ -353,6 +397,14 @@ async def invite_user(
             },
         },
     )
+
+    # Existing members must rotate group sender keys for the newcomer.
+    if newly_added and room.room_type in ("group", "public"):
+        await _notify_roster_change(
+            db, room, target, "member_joined", exclude_ids={target.id}
+        )
+    if newly_added:
+        await _relay_membership_event(db, room, "add", target)
 
     return response
 
@@ -388,6 +440,14 @@ async def remove_member(
     await db.commit()
 
     await ws_manager.revoke_access(target.id, room_id)
+
+    # Remaining members must rotate group sender keys; the removed user is
+    # told too so their client can drop the room.
+    if room.room_type in ("group", "public"):
+        await _notify_roster_change(
+            db, room, target, "member_removed", include_ids=[target.id]
+        )
+    await _relay_membership_event(db, room, "remove", target)
 
     return await _room_to_response(room, db)
 
@@ -481,3 +541,18 @@ async def get_user_chats(user: User, db: AsyncSession) -> list[RoomResponse]:
     )
     rooms = result.scalars().all()
     return await _rooms_to_responses(list(rooms), db)
+
+
+async def get_room(room_id: int, user: User, db: AsyncSession) -> RoomResponse:
+    """Одна комната с актуальным списком участников (для членов)."""
+    room = await db.get(Room, room_id)
+    if room is None:
+        raise HTTPException(status_code=404, detail="Room not found")
+    membership = await db.execute(
+        select(RoomMember).where(
+            RoomMember.room_id == room_id, RoomMember.user_id == user.id
+        )
+    )
+    if membership.scalar_one_or_none() is None:
+        raise HTTPException(status_code=403, detail="Not a member of this room")
+    return await _room_to_response(room, db)

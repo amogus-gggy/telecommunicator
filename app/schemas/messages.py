@@ -21,7 +21,8 @@ class MessageResponse(BaseModel):
 
 class SendEncryptedMessageRequest(BaseModel):
     room_id: int
-    recipient_username: str
+    # None => sender-key group message (one ciphertext broadcast to the room).
+    recipient_username: str | None = None
     encrypted_blob: str
     sender_encrypted_blob: str
     signature: str
@@ -38,7 +39,9 @@ class EncryptedMessageResponse(BaseModel):
     message_id: int
     sender_id: int
     sender_username: str
+    room_id: int | None = None
     encrypted_blob: str
+    sender_encrypted_blob: str | None = None
     signature: str
     created_at: datetime
 

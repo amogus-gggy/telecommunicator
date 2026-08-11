@@ -48,6 +48,15 @@ async def get_my_chats(
     return await room_service.get_user_chats(current_user, db)
 
 
+@router.get("/{room_id}", response_model=RoomResponse)
+async def get_room(
+    room_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RoomResponse:
+    return await room_service.get_room(room_id, current_user, db)
+
+
 @router.post("/personal", response_model=RoomResponse, status_code=201)
 async def create_personal_chat(
     data: PersonalChatRequest,
