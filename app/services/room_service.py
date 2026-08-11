@@ -94,6 +94,7 @@ def _build_response(
         server_name=room.server_name,
         remote_room_id=room.remote_room_id,
         participants=participants or [],
+        key_epoch=int(getattr(room, "key_epoch", 1) or 1),
     )
 
 
@@ -102,6 +103,25 @@ def _member_handle(user: User) -> str:
     if user.server_name and user.server_name != SERVER_NAME:
         return f"{user.username}@{user.server_name}"
     return user.username
+
+
+async def _rotate_group_keys(db: AsyncSession, room: Room) -> None:
+    """Invalidate the room's sender keys after a membership change.
+
+    Personal chats are skipped: they use the pairwise Double Ratchet, which
+    already gives forward secrecy without an epoch counter.
+    """
+    if room.room_type not in (RoomType.GROUP, RoomType.PUBLIC, "group", "public"):
+        return
+    # Imported lazily: sender_key_service imports message_service, which would
+    # otherwise create an import cycle at module load.
+    from app.services.sender_key_service import bump_key_epoch
+
+    # Deliberately not wrapped in try/except: if the epoch cannot be bumped
+    # after a removal, the removed member would keep a usable chain, so the
+    # membership change must fail loudly rather than silently leak.
+    await bump_key_epoch(db, room.id)
+    await db.refresh(room)
 
 
 async def _room_to_response(room: Room, db: AsyncSession) -> RoomResponse:
@@ -229,6 +249,9 @@ async def join_room(room_id: int, user: User, db: AsyncSession) -> RoomResponse:
             is_first_time_join = True
         db.add(RoomMember(room_id=room_id, user_id=user.id))
         await db.commit()
+        # Group E2EE: the audience changed, so every existing sender chain is
+        # stale — bump the epoch to force a rotation before the next message.
+        await _rotate_group_keys(db, room)
 
     # Send first-time join notification to existing members
     if is_first_time_join:
@@ -295,6 +318,8 @@ async def leave_room(room_id: int, user: User, db: AsyncSession) -> RoomResponse
     await db.commit()
 
     await ws_manager.revoke_access(user.id, room_id)
+    # A departed member must not be able to read anything sent from now on.
+    await _rotate_group_keys(db, room)
 
     return await _room_to_response(room, db)
 
@@ -331,6 +356,9 @@ async def invite_user(
     if existing.scalar_one_or_none() is None:
         db.add(RoomMember(room_id=room_id, user_id=target.id))
         await db.commit()
+        # New member → new epoch, so members redistribute their sender chains
+        # and the newcomer can decrypt from its first message onward.
+        await _rotate_group_keys(db, room)
 
     # If we host this room, make sure remote members get a mirror.
     await _ensure_remote_mirrors(db, room, [requester, target])
@@ -388,6 +416,8 @@ async def remove_member(
     await db.commit()
 
     await ws_manager.revoke_access(target.id, room_id)
+    # Removal is the critical rotation case: forward secrecy for the group.
+    await _rotate_group_keys(db, room)
 
     return await _room_to_response(room, db)
 

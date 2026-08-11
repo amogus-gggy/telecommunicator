@@ -26,6 +26,12 @@ class Room(Base):
     read_only: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
+    # --- Group E2EE (sender keys) ---
+    # Membership generation counter. Bumped on every join/invite/leave/removal
+    # so clients know their sender chain is stale and must be rotated before
+    # the next message (a removed member must not be able to read on).
+    key_epoch: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
     # --- Federation fields ---
     # Name of the server that hosts the canonical copy of this room. For rooms
     # created locally it equals SERVER_NAME.

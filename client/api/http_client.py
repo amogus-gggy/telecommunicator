@@ -362,6 +362,72 @@ class APIClient:
             r = await self._post("/messages", json=payload, timeout=timeout)
         return r.json()
 
+    # ------------------------------------------------------------------
+    # Group E2EE (sender keys)
+    # ------------------------------------------------------------------
+
+    async def get_sender_key_state(self, room_id: int) -> dict:
+        """Current ``key_epoch`` + member handles of a group room."""
+        r = await self._get(f"/rooms/{room_id}/sender-keys/state")
+        return r.json()
+
+    async def distribute_sender_keys(
+        self,
+        room_id: int,
+        chain_id: str,
+        key_epoch: int,
+        bundles: list[dict],
+    ) -> dict:
+        """Upload one pairwise-encrypted copy of our sender chain per member."""
+        payload = {
+            "chain_id": chain_id,
+            "key_epoch": key_epoch,
+            "bundles": bundles,
+        }
+        r = await self._post(f"/rooms/{room_id}/sender-keys", json=payload)
+        return r.json()
+
+    async def get_pending_sender_keys(self, room_id: int | None = None) -> list[dict]:
+        """Fetch the sender-key bundles addressed to us (offline catch-up)."""
+        params: dict[str, Any] = {}
+        if room_id is not None:
+            params["room_id"] = room_id
+        r = await self._get("/sender-keys", params=params)
+        return r.json()
+
+    async def send_group_message(
+        self,
+        room_id: int,
+        encrypted_blob_b64: str,
+        signature_b64: str,
+        chain_id: str,
+        key_epoch: int,
+        file_ids: list[int] | None = None,
+    ) -> dict:
+        """Send one sender-key (v3) ciphertext to a whole room."""
+        payload = {
+            "encrypted_blob": encrypted_blob_b64,
+            "signature": signature_b64,
+            "chain_id": chain_id,
+            "key_epoch": key_epoch,
+            "file_ids": file_ids or [],
+        }
+        # Same fan-out latency concerns as the pairwise path: be generous and
+        # retry once, because a lost response would otherwise burn a chain key.
+        timeout = httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0)
+        path = f"/rooms/{room_id}/group-messages"
+        try:
+            r = await self._post(path, json=payload, timeout=timeout)
+        except httpx.ReadTimeout:
+            logger.warning(
+                "[APIClient] ReadTimeout on POST %s, retrying with fresh connection",
+                path,
+            )
+            _shared_clients.pop(self.base_url, None)
+            self._client = _get_shared_http_client(self.base_url)
+            r = await self._post(path, json=payload, timeout=timeout)
+        return r.json()
+
     async def get_encrypted_messages(
         self, room_id: int | None = None, since: str | None = None
     ) -> list[dict]:

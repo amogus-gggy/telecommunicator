@@ -30,10 +30,15 @@ def _decrypt_file_to_path(
     signature_b64: str | None = None,
     x25519_priv=None,
     sender_ed25519_pub=None,
+    file_key_b64: str | None = None,
 ) -> None:
     """Synchronous helper — runs in thread pool via asyncio.to_thread."""
     with open(src_path, "rb") as src, open(dst_path, "wb") as dst:
-        if own:
+        if file_key_b64 is not None:
+            # Group attachment: the key was already recovered (and its
+            # signature verified) from the room sender key.
+            decryptor.decrypt_file_streaming_with_key(src, dst, file_key_b64)
+        elif own:
             decryptor.decrypt_own_file_streaming(src, dst, key_sender_blob_b64, x25519_priv)
         else:
             decryptor.decrypt_file_streaming(src, dst, key_blob_b64, signature_b64, x25519_priv, sender_ed25519_pub)
@@ -436,12 +441,35 @@ def room_view(page: flet.Page, state: AppState) -> None:
                             page.update()
 
                             decryptor = FileDecryptor()
+                            is_group_room_view = room.room_type in ("group", "public")
                             if is_own and file_meta.get("key_sender_blob"):
                                 await asyncio.to_thread(
                                     _decrypt_file_to_path, decryptor, tmp_path, save_path,
                                     key_sender_blob_b64=file_meta["key_sender_blob"],
                                     x25519_priv=state.x25519_private,
                                     own=True,
+                                )
+                            elif (
+                                is_group_room_view
+                                and file_meta.get("key_blob")
+                                and file_meta.get("key_signature")
+                            ):
+                                # Group attachment: the file key is sealed with
+                                # the uploader's sender key, not wrapped for us
+                                # individually.
+                                from crypto.group_session import open_file_key
+
+                                file_key_b64 = await open_file_key(
+                                    state,
+                                    client,
+                                    fid,
+                                    file_meta["key_blob"],
+                                    file_meta["key_signature"],
+                                )
+                                await asyncio.to_thread(
+                                    _decrypt_file_to_path, decryptor, tmp_path, save_path,
+                                    file_key_b64=file_key_b64,
+                                    own=False,
                                 )
                             elif sender_keys and file_meta.get("key_blob") and file_meta.get("key_signature"):
                                 await asyncio.to_thread(
@@ -659,6 +687,15 @@ def room_view(page: flet.Page, state: AppState) -> None:
         ):
             sender_blob = msg.get("sender_encrypted_blob")
             if not sender_blob:
+                # Group (v3) messages carry no sender copy: we own the chain and
+                # its message keys are burned on use, so the only way to re-read
+                # our own text is the local plaintext store checked above.
+                from crypto.sender_key import peek_group_header as _peek_group
+
+                if _peek_group(msg.get("encrypted_blob") or "") is not None:
+                    msg["body"] = msg.get("body") or t("room.encrypted_sent")
+                    return msg
+            if not sender_blob:
                 # Old message without sender copy — just show placeholder
                 if not msg.get("body"):
                     msg["body"] = t("room.encrypted_sent")
@@ -689,6 +726,11 @@ def room_view(page: flet.Page, state: AppState) -> None:
         from crypto.message_store import get_message_store
         from crypto.ratchet_facade import RatchetDecryptor, peek_blob_version
         from crypto.ratchet_session_store import get_session_store
+        from crypto.group_session import (
+            UnknownSenderKeyError,
+            decrypt_group_message,
+        )
+        from crypto.sender_key import peek_group_header
         from cryptography.exceptions import InvalidSignature, InvalidTag
 
         try:
@@ -748,7 +790,17 @@ def room_view(page: flet.Page, state: AppState) -> None:
             logging.info(f"[DECRYPT] Decrypting message from {sender_username}")
             encrypted_data = {"blob": encrypted_blob, "signature": signature}
 
-            if peek_blob_version(encrypted_blob) >= 2:
+            if peek_group_header(encrypted_blob) is not None:
+                # Group message (v3): decrypt with the sender's chain, pulling
+                # its distribution bundle from the server if we miss it.
+                group_client = APIClient(state=state)
+                try:
+                    plaintext = await decrypt_group_message(
+                        state, group_client, encrypted_blob, signature
+                    )
+                finally:
+                    await group_client.aclose()
+            elif peek_blob_version(encrypted_blob) >= 2:
                 plaintext = RatchetDecryptor().decrypt_message(
                     encrypted_data,
                     peer_key=sender_username,
@@ -789,6 +841,15 @@ def room_view(page: flet.Page, state: AppState) -> None:
             msg["body"] = t("room.encrypted_bad_key")
             msg["decryption_error"] = True
             return msg
+        except UnknownSenderKeyError:
+            # The sender's chain has not reached us (yet): they rotated while we
+            # were offline, or we joined after the message was sent.
+            logging.warning(
+                f"[DECRYPT] No sender key for message from {sender_username}"
+            )
+            msg["body"] = t("room.encrypted_no_sender_key")
+            msg["decryption_error"] = True
+            return msg
         except KeyConsumedError:
             logging.warning(
                 f"[DECRYPT] Ratchet key already consumed for message from {sender_username}"
@@ -801,6 +862,85 @@ def room_view(page: flet.Page, state: AppState) -> None:
             msg["body"] = t("room.encrypted_error", exc=exc)
             msg["decryption_error"] = True
             return msg
+
+    def _on_sender_key(payload: dict) -> None:
+        """Handle group key-distribution frames pushed over the WebSocket.
+
+        Two frame types arrive here:
+          * ``sender_key_bundle``   — another member's chain, sealed for us.
+          * ``sender_key_rotation`` — membership changed, the room epoch was
+            bumped; our own chain is now stale and must be rebuilt before the
+            next send, and peers will re-distribute theirs.
+        """
+        frame_type = payload.get("type")
+        data = payload.get("payload", {}) or {}
+
+        async def _handle() -> None:
+            import logging
+
+            client = APIClient(state=state)
+            try:
+                if frame_type == "sender_key_bundle":
+                    from crypto.group_session import ingest_bundle
+
+                    accepted = await ingest_bundle(state, client, data)
+                    logging.info(
+                        "[WS] sender_key_bundle from %s accepted=%s",
+                        data.get("sender_username"),
+                        accepted,
+                    )
+                    if accepted and data.get("room_id") == room.id:
+                        # Messages shown as undecryptable may now be readable.
+                        await _retry_failed_decryptions()
+                elif frame_type == "sender_key_rotation":
+                    from crypto.group_session import sync_sender_keys
+                    from crypto.sender_key_store import get_sender_key_store
+
+                    room_id = data.get("room_id")
+                    new_epoch = int(data.get("key_epoch") or 0)
+                    if room_id == room.id and new_epoch:
+                        room.key_epoch = new_epoch
+                    store = get_sender_key_store(state)
+                    if store is not None and room_id is not None:
+                        # Drop our chain: it belongs to the previous epoch and
+                        # was never distributed to the current member set.
+                        store.drop_own(room_id)
+                    fetched = await sync_sender_keys(state, client, room_id)
+                    logging.info(
+                        "[WS] sender_key_rotation room=%s epoch=%s bundles=%s",
+                        room_id,
+                        new_epoch,
+                        fetched,
+                    )
+                    if fetched and room_id == room.id:
+                        await _retry_failed_decryptions()
+            except Exception as exc:
+                logging.error("[WS] sender key frame failed: %s", exc, exc_info=True)
+            finally:
+                await client.aclose()
+
+        page.run_task(_handle)
+
+    async def _retry_failed_decryptions() -> None:
+        """Re-run decryption for tiles that failed for a missing sender key."""
+        changed = False
+        for i, existing in enumerate(_state.get("messages_data", [])):
+            if not existing.get("decryption_error"):
+                continue
+            if not existing.get("encrypted_blob"):
+                continue
+            retry = dict(existing)
+            retry.pop("decryption_error", None)
+            retry.pop("signature_error", None)
+            decrypted = await _decrypt_message_if_needed(retry)
+            if decrypted.get("decryption_error"):
+                continue
+            _state["messages_data"][i] = decrypted
+            if i < len(messages_list.controls):
+                messages_list.controls[i] = _build_message_tile(decrypted)
+            changed = True
+        if changed:
+            page.update()
 
     def _on_ws_message(payload: dict) -> None:
         print(f"[WS] Received raw payload: {payload}")  # Log raw payload
@@ -1134,6 +1274,10 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 # Upload files first (streaming — no full file in memory)
                 uploaded_files = []
                 is_personal = room.room_type == "personal"
+                # Group/public rooms use sender keys (v3) for the message body.
+                # Attachments keep the existing behaviour: their key blob format
+                # is pairwise-only, so group files are still uploaded as-is.
+                is_group = room.room_type in ("group", "public")
 
                 # Resolve E2EE recipient keys once for all files
                 e2ee_recipient_keys = None
@@ -1173,7 +1317,42 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     key_sender_blob = None
                     key_signature = None
 
-                    if e2ee_recipient_keys and state.ed25519_private and state.x25519_private and state.current_user:
+                    if is_group and state.ed25519_private and state.x25519_private and state.current_user:
+                        # Group attachment: encrypt the body once, then seal the
+                        # file key with the room sender key (one wrap for the
+                        # whole room instead of one per member).
+                        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".enc")
+                        tmp_path = tmp.name
+                        tmp.close()
+                        try:
+                            from crypto.group_session import seal_file_key_for_room
+
+                            enc = FileEncryptor()
+
+                            def _do_encrypt_group():
+                                with open(tmp_path, "wb") as dst_f:
+                                    return enc.encrypt_file_streaming_group(
+                                        file_path, dst_f, file_name,
+                                        state.x25519_private.public_key(),
+                                        str(state.current_user.id),
+                                    )
+
+                            meta = await asyncio.to_thread(_do_encrypt_group)
+                            sealed = await seal_file_key_for_room(
+                                state, client, room.id, meta["file_key"]
+                            )
+                            key_blob = sealed["key_blob"]
+                            key_signature = sealed["key_signature"]
+                            key_sender_blob = meta["key_sender_blob"]
+                            upload_path = tmp_path
+                        except Exception as enc_exc:
+                            logging.error(f"[FILE] Group encryption failed: {enc_exc}", exc_info=True)
+                            if os.path.exists(tmp_path):
+                                os.unlink(tmp_path)
+                            upload_path = file_path  # fall back to plaintext
+                            tmp_path = None
+                            key_blob = key_sender_blob = key_signature = None
+                    elif e2ee_recipient_keys and state.ed25519_private and state.x25519_private and state.current_user:
                         # Stream-encrypt into a temp file — never loads full file into memory
                         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".enc")
                         tmp_path = tmp.name
@@ -1378,8 +1557,51 @@ def room_view(page: flet.Page, state: AppState) -> None:
                                 messages_list.controls.pop()
                         snack(page, t("room.send_error", exc=enc_exc), ok=False)
                         return
+                elif (
+                    is_group
+                    and state.ed25519_private
+                    and state.x25519_private
+                    and state.current_user
+                ):
+                    # Group E2EE: one symmetric encryption with our sender chain,
+                    # regardless of how many members the room has. The chain is
+                    # created/rotated and distributed inside encrypt_group_message.
+                    try:
+                        import logging
+                        from crypto.group_session import encrypt_group_message
+
+                        logging.info(f"[SEND] Encrypting group message for room {room.id}")
+                        encrypted_data = await encrypt_group_message(
+                            state, client, room.id, resolved_body
+                        )
+                        await client.send_group_message(
+                            room_id=room.id,
+                            encrypted_blob_b64=encrypted_data["blob"],
+                            signature_b64=encrypted_data["signature"],
+                            chain_id=encrypted_data["chain_id"],
+                            key_epoch=encrypted_data["key_epoch"],
+                            file_ids=[f["id"] for f in uploaded_files if f.get("id")],
+                        )
+                        logging.info("[SEND] Encrypted group message sent successfully")
+                    except Exception as enc_exc:
+                        import logging
+
+                        logging.error(
+                            f"[SEND] Group encryption/send failed: {enc_exc}",
+                            exc_info=True,
+                        )
+                        # Never silently downgrade to plaintext: drop the
+                        # optimistic tile and tell the user instead.
+                        if _state["messages_data"] and _state["messages_data"][-1].get(
+                            "is_optimistic"
+                        ):
+                            _state["messages_data"].pop()
+                            if messages_list.controls:
+                                messages_list.controls.pop()
+                        snack(page, t("room.send_error", exc=enc_exc), ok=False)
+                        return
                 else:
-                    # Send plaintext via WebSocket (group chat or no keys)
+                    # Send plaintext via WebSocket (no keys available)
                     print("[SEND] Sending plaintext message via WebSocket")
                     await ws.send_message(room.id, resolved_body, files=uploaded_files)
 
@@ -1441,6 +1663,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
             # Same room and socket already subscribed — reuse connection.
             state.ws._on_room_message = _on_ws_message
             state.ws._on_reconnecting = _on_reconnecting
+            state.ws._on_sender_key = _on_sender_key
             state.ws.set_room(room.id)
             _state["ws_client"] = state.ws
             logger.debug(
@@ -1454,6 +1677,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         if state.ws is not None:
             state.ws._on_room_message = None
             state.ws._on_reconnecting = None
+            state.ws._on_sender_key = None
             state.ws.close()
             state.ws = None
 
@@ -1463,6 +1687,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
             on_room_message=_on_ws_message,
             on_reconnecting=_on_reconnecting,
             ws_url=state.ws_url,
+            on_sender_key=_on_sender_key,
         )
         ws.set_room(room.id)
         _state["ws_client"] = ws
@@ -1474,6 +1699,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         if state.ws is not None:
             state.ws._on_room_message = None
             state.ws._on_reconnecting = None
+            state.ws._on_sender_key = None
             state.ws.set_room(None)
         state.on_alignment_change = None
         _state["ws_client"] = None

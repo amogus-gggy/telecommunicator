@@ -21,6 +21,9 @@ class RoomResponse(BaseModel):
     server_name: str | None = None
     remote_room_id: int | None = None
     participants: list[str] = []
+    # Group E2EE: membership generation. A client whose sender chain was built
+    # for an older epoch must rotate before sending again.
+    key_epoch: int = 1
 
 
 class PermissionUpdate(BaseModel):

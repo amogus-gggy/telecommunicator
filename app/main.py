@@ -43,12 +43,14 @@ from app.routers import backup as backup_router  # noqa: E402
 from app.routers import federation as federation_router  # noqa: E402
 from app.routers import messages as messages_router  # noqa: E402
 from app.routers import rooms as rooms_router  # noqa: E402
+from app.routers import sender_keys as sender_keys_router  # noqa: E402
 from app.routers import users as users_router  # noqa: E402
 from app.routers import ws as ws_router  # noqa: E402
 
 app.include_router(auth_router.router)
 app.include_router(rooms_router.router)
 app.include_router(messages_router.router)
+app.include_router(sender_keys_router.router)
 app.include_router(users_router.router)
 app.include_router(ws_router.router)
 app.include_router(backup_router.router)

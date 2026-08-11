@@ -3,6 +3,7 @@ from app.models.message import Message
 from app.models.remote_room_link import RemoteRoomLink
 from app.models.room import Room
 from app.models.room_member import RoomMember
+from app.models.sender_key import SenderKeyDistribution
 from app.models.server import Server
 from app.models.user import User
 
@@ -14,4 +15,5 @@ __all__ = [
     "Server",
     "RemoteRoomLink",
     "FederationOutbox",
+    "SenderKeyDistribution",
 ]

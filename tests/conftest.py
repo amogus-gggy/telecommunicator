@@ -18,6 +18,7 @@ from app.routers import backup as backup_router
 from app.routers import federation as federation_router
 from app.routers import rooms as rooms_router
 from app.routers import messages as messages_router
+from app.routers import sender_keys as sender_keys_router
 from app.routers import users as users_router
 from app.services.rate_limit import limiter
 
@@ -76,6 +77,7 @@ async def client(test_db: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     test_app.include_router(auth_router.router)
     test_app.include_router(rooms_router.router)
     test_app.include_router(messages_router.router)
+    test_app.include_router(sender_keys_router.router)
     test_app.include_router(users_router.router)
     test_app.include_router(backup_router.router)
     test_app.include_router(federation_router.router)

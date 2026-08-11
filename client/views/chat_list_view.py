@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import flet
 
@@ -499,15 +500,52 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
             )
             page.run_task(_load_chats)
 
+    def _on_sender_key(payload: dict) -> None:
+        """Ingest group key material that arrives while we are on this screen.
+
+        Without this the frame is dropped and the chain is only recovered by a
+        catch-up fetch the next time a group message fails to decrypt, which
+        shows the user a spurious "cannot decrypt" tile first.
+        """
+        frame_type = payload.get("type")
+        data = payload.get("payload", {}) or {}
+
+        async def _handle() -> None:
+            client = APIClient(state=state)
+            try:
+                if frame_type == "sender_key_bundle":
+                    from crypto.group_session import ingest_bundle
+
+                    await ingest_bundle(state, client, data)
+                elif frame_type == "sender_key_rotation":
+                    from crypto.group_session import sync_sender_keys
+                    from crypto.sender_key_store import get_sender_key_store
+
+                    room_id = data.get("room_id")
+                    store = get_sender_key_store(state)
+                    if store is not None and room_id is not None:
+                        # Our chain belongs to the previous epoch: drop it so the
+                        # next send rebuilds and redistributes it.
+                        store.drop_own(room_id)
+                    await sync_sender_keys(state, client, room_id)
+            except Exception as exc:  # noqa: BLE001 - never break the chat list
+                logging.error("[WS] sender key frame failed: %s", exc, exc_info=True)
+            finally:
+                await client.aclose()
+
+        page.run_task(_handle)
+
     async def _start_notifications() -> None:
         # Reuse existing connection if already alive, otherwise create one
         if state.ws is not None:
             # Update the notification callback on the existing connection
             state.ws._on_notification = _on_notification
+            state.ws._on_sender_key = _on_sender_key
             return
         nc = UnifiedWsClient(
             token=state.token or "",
             on_notification=_on_notification,
+            on_sender_key=_on_sender_key,
             ws_url=state.ws_url,
         )
         state.ws = nc

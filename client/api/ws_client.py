@@ -12,6 +12,7 @@ Usage
         token="...",
         on_room_message=handle_msg,       # called for type=="message" / "encrypted_message"
         on_notification=handle_notif,     # called for type=="invite" / "member_joined" / etc.
+        on_sender_key=handle_key,         # called for type=="sender_key_bundle" / "sender_key_rotation"
         on_reconnecting=handle_reconnect,
     )
     # Optionally subscribe to a room on connect:
@@ -62,10 +63,15 @@ class UnifiedWsClient:
         on_notification: Callable[[dict], None] | None = None,
         on_reconnecting: Callable[[float], None] | None = None,
         ws_url: str | None = None,
+        on_sender_key: Callable[[dict], None] | None = None,
     ) -> None:
         self._token = token
         self._on_room_message = on_room_message
         self._on_notification = on_notification
+        # Group E2EE key material / rotation notices. Routed separately from
+        # ordinary notifications because the notification callback is swapped
+        # between views, and a dropped bundle would cost a needless key fetch.
+        self._on_sender_key = on_sender_key
         self._on_reconnecting = on_reconnecting
         self._ws_url = ws_url or WS_URL
         self._closed = False
@@ -127,6 +133,12 @@ class UnifiedWsClient:
                     self._on_room_message(payload)
                 except Exception as exc:
                     logger.error("[WS] on_room_message raised: %s", exc, exc_info=True)
+        elif msg_type in ("sender_key_bundle", "sender_key_rotation"):
+            if self._on_sender_key is not None:
+                try:
+                    self._on_sender_key(payload)
+                except Exception as exc:
+                    logger.error("[WS] on_sender_key raised: %s", exc, exc_info=True)
         else:
             # Everything else is a notification (invite, member_joined, error, …)
             if self._on_notification is not None:

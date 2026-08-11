@@ -244,6 +244,42 @@ class FileEncryptor:
             "signature": b64encode(signature_bytes).decode("ascii"),
         }
 
+    def encrypt_file_streaming_group(
+        self,
+        src_path: str,
+        dst: BinaryIO,
+        filename: str,
+        sender_x25519_pub: X25519PublicKey,
+        sender_id: str,
+    ) -> dict:
+        """Stream-encrypt *src_path* for a group room.
+
+        The body format is identical to the pairwise case (it is
+        recipient-independent), only the key handling differs: instead of
+        wrapping the file key for a single peer, the raw key is returned so the
+        caller can seal it with the room sender key — one wrap for the whole
+        room instead of one per member.  A self-wrapped copy is still produced
+        so the uploader can re-download its own attachment (its own sender-key
+        message keys are burned on use).
+
+        Returns ``{"file_key", "key_sender_blob"}``.
+        """
+        ephemeral_priv, ephemeral_pub = KeyGenerator.generate_ephemeral_keypair()
+        ephemeral_pub_bytes = KeyGenerator.serialize_public_key(ephemeral_pub)
+        file_key = os.urandom(32)
+
+        with open(src_path, "rb") as src:
+            encrypt_stream(src, dst, file_key)
+
+        key_sender_blob_b64, _ = _make_key_blob(
+            file_key, ephemeral_priv, ephemeral_pub_bytes,
+            sender_x25519_pub, sender_id, sender_id, filename,
+        )
+        return {
+            "file_key": b64encode(file_key).decode("ascii"),
+            "key_sender_blob": key_sender_blob_b64,
+        }
+
     # Keep old in-memory API for backwards compat (small files / tests)
     def encrypt_file(
         self,
@@ -308,6 +344,20 @@ class FileDecryptor:
     ) -> None:
         file_key = self._unwrap_key(b64decode(key_sender_blob_b64), x25519_priv)
         decrypt_stream(src, dst, file_key)
+
+    def decrypt_file_streaming_with_key(
+        self,
+        src: BinaryIO,
+        dst: BinaryIO,
+        file_key_b64: str,
+    ) -> None:
+        """Decrypt a body whose file key was recovered out of band.
+
+        Used by group rooms, where the key travels inside a sender-key sealed
+        blob rather than a pairwise wrap.  Authenticity is already established
+        by the signature on that blob, so no further verification happens here.
+        """
+        decrypt_stream(src, dst, b64decode(file_key_b64))
 
     @staticmethod
     def _unwrap_key(key_blob_bytes: bytes, x25519_priv: X25519PrivateKey) -> bytes:
