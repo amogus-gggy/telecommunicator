@@ -248,6 +248,21 @@ def profile_view(page: flet.Page, state: AppState) -> None:
         f"{user.username}@{user.server_name}" if user and user.server_name else (user.username if user else "")
     )
 
+    def _info_row(icon: str, text: flet.Control | str) -> flet.Row:
+        return flet.Row(
+            controls=[
+                flet.Icon(icon, color=flet.Colors.ON_SURFACE_VARIANT, size=20),
+                text
+                if isinstance(text, flet.Control)
+                else flet.Text(text, size=14, color=flet.Colors.ON_SURFACE),
+            ],
+            spacing=12,
+        )
+
+    avatar_name = (
+        (user.display_name or user.username) if user else "?"
+    )
+
     page.controls.clear()
     page.add(
         flet.Column(

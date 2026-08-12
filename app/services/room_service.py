@@ -173,6 +173,13 @@ async def _relay_membership_event(
             continue
 
 
+def _member_handle(user: User) -> str:
+    """Full ``username@server`` handle; bare username for local users."""
+    if user.server_name and user.server_name != SERVER_NAME:
+        return f"{user.username}@{user.server_name}"
+    return user.username
+
+
 async def _room_to_response(room: Room, db: AsyncSession) -> RoomResponse:
     """Single-room response — used after mutations where we already have the room."""
     owner = await db.get(User, room.owner_id)
