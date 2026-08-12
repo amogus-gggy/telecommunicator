@@ -2,12 +2,13 @@ import base64
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
 from app.db.deps import get_db
 from app.models.message import Message
+from app.models.room_member import RoomMember
 from app.models.user import User
 from app.schemas.messages import (
     EncryptedMessageResponse,
@@ -73,12 +74,24 @@ async def get_encrypted_messages(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[EncryptedMessageResponse]:
-    # Build query: messages addressed to current user that are encrypted
+    # Encrypted messages addressed to the caller (1:1) plus group ciphertexts
+    # (no recipient) in rooms the caller is a member of.
+    member_rooms = select(RoomMember.room_id).where(
+        RoomMember.user_id == current_user.id
+    )
     stmt = (
         select(Message, User)
         .join(User, Message.author_id == User.id)
-        .where(Message.recipient_id == current_user.id)
         .where(Message.is_encrypted == True)  # noqa: E712
+        .where(
+            or_(
+                Message.recipient_id == current_user.id,
+                and_(
+                    Message.recipient_id.is_(None),
+                    Message.room_id.in_(member_rooms),
+                ),
+            )
+        )
     )
     if room_id is not None:
         stmt = stmt.where(Message.room_id == room_id)
@@ -90,18 +103,28 @@ async def get_encrypted_messages(
     rows = result.all()
 
     responses: list[EncryptedMessageResponse] = []
+    changed = False
     for msg, sender in rows:
-        # Mark as delivered
-        msg.delivered_at = datetime.now(timezone.utc)
+        # Mark addressed (1:1) messages as delivered; group ciphertexts have no
+        # single recipient to acknowledge.
+        if msg.recipient_id == current_user.id:
+            msg.delivered_at = datetime.now(timezone.utc)
+            changed = True
         author_handle = _author_handle(sender)
         responses.append(
             EncryptedMessageResponse(
                 message_id=msg.id,
                 sender_id=sender.id,
                 sender_username=author_handle,
+                room_id=msg.room_id,
                 encrypted_blob=base64.b64encode(msg.encrypted_blob).decode()
                 if msg.encrypted_blob
                 else "",
+                sender_encrypted_blob=base64.b64encode(
+                    msg.sender_encrypted_blob
+                ).decode()
+                if msg.sender_encrypted_blob
+                else None,
                 signature=base64.b64encode(msg.signature).decode()
                 if msg.signature
                 else "",
@@ -109,7 +132,7 @@ async def get_encrypted_messages(
             )
         )
 
-    if rows:
+    if changed:
         await db.commit()
 
     return responses

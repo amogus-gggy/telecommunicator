@@ -545,22 +545,25 @@ async def get_message_history(
 async def send_encrypted_message(
     db: AsyncSession,
     sender_id: int,
-    recipient_username: str,
+    recipient_username: str | None,
     room_id: int,
     encrypted_blob: bytes,
     sender_encrypted_blob: bytes,
     signature: bytes,
     file_ids: list[int] | None = None,
 ) -> SendMessageResponse:
-    """Persist and deliver an E2EE message. Raises HTTPException on failure."""
-    # 1. Resolve recipient by username (supports user@server handles)
-    recipient = await resolve_user(db, recipient_username)
+    """Persist and deliver an E2EE message. Raises HTTPException on failure.
+
+    With ``recipient_username`` the message is delivered to a single user
+    (1:1 chat). Without it, one ciphertext is broadcast to the whole room
+    (sender-key group encryption).
+    """
     sender_result = await db.execute(select(User).where(User.id == sender_id))
     sender = sender_result.scalar_one_or_none()
     if sender is None:
         raise HTTPException(status_code=404, detail="Sender not found")
 
-    # 2. Verify sender is a member of the room
+    # 1. Verify sender is a member of the room
     membership = await db.execute(
         select(RoomMember).where(
             RoomMember.room_id == room_id, RoomMember.user_id == sender_id
@@ -569,6 +572,11 @@ async def send_encrypted_message(
     if membership.scalar_one_or_none() is None:
         raise HTTPException(status_code=403, detail="Not a member of this room")
 
+    # 2. Resolve recipient (None => group message)
+    recipient = None
+    if recipient_username:
+        recipient = await resolve_user(db, recipient_username)
+
     # 3. Persist the encrypted message
     msg = Message(
         room_id=room_id,
@@ -576,7 +584,7 @@ async def send_encrypted_message(
         encrypted_blob=encrypted_blob,
         sender_encrypted_blob=sender_encrypted_blob,
         signature=signature,
-        recipient_id=recipient.id,
+        recipient_id=recipient.id if recipient else None,
         is_encrypted=True,
     )
     msg.event_id = _new_event_id()
@@ -595,66 +603,61 @@ async def send_encrypted_message(
         await db.commit()
         await db.refresh(msg)
 
-    # 4. Attempt WebSocket delivery to recipient — include full encrypted payload
+    # Load associated files for the WS payload
+    sender_username = _author_handle(sender)
+    msg_with_files = await db.execute(
+        select(Message)
+        .options(selectinload(Message.files))
+        .where(Message.id == msg.id)
+    )
+    msg_loaded = msg_with_files.scalar_one()
+    files_payload = [
+        {
+            "id": f.id,
+            "filename": f.filename,
+            "room_id": f.room_id,
+            "uploader_id": f.uploader_id,
+            "uploader_username": sender_username,
+            "created_at": f.created_at.isoformat(),
+            "is_encrypted": f.is_encrypted,
+            "key_blob": f.key_blob,
+            "key_sender_blob": f.key_sender_blob,
+            "key_signature": f.key_signature,
+        }
+        for f in (msg_loaded.files or [])
+    ]
+
+    frame = {
+        "type": "encrypted_message",
+        "payload": {
+            "message_id": msg.id,
+            "sender_id": sender_id,
+            "sender_username": sender_username,
+            "room_id": room_id,
+            "encrypted_blob": base64.b64encode(encrypted_blob).decode(),
+            "sender_encrypted_blob": base64.b64encode(
+                sender_encrypted_blob
+            ).decode(),
+            "signature": base64.b64encode(signature).decode(),
+            "is_encrypted": True,
+            "created_at": msg.created_at.isoformat(),
+            "files": files_payload,
+        },
+    }
+
+    # 4. Deliver: user-addressed frame for 1:1, room broadcast for groups
     delivered = False
     try:
-        # Also look up sender username for the client
-        sender_result = await db.execute(select(User).where(User.id == sender_id))
-        sender = sender_result.scalar_one_or_none()
-        sender_username = _author_handle(sender)
-
-        # Load associated files for the WS payload
-        from app.models.file import File
-        from sqlalchemy.orm import selectinload
-
-        msg_with_files = await db.execute(
-            select(Message)
-            .options(selectinload(Message.files))
-            .where(Message.id == msg.id)
-        )
-        msg_loaded = msg_with_files.scalar_one()
-        files_payload = [
-            {
-                "id": f.id,
-                "filename": f.filename,
-                "room_id": f.room_id,
-                "uploader_id": f.uploader_id,
-                "uploader_username": sender_username,
-                "created_at": f.created_at.isoformat(),
-                "is_encrypted": f.is_encrypted,
-                "key_blob": f.key_blob,
-                "key_sender_blob": f.key_sender_blob,
-                "key_signature": f.key_signature,
-            }
-            for f in (msg_loaded.files or [])
-        ]
-
-        await manager.send_to_user(
-            recipient.id,
-            {
-                "type": "encrypted_message",
-                "payload": {
-                    "message_id": msg.id,
-                    "sender_id": sender_id,
-                    "sender_username": sender_username,
-                    "room_id": room_id,
-                    "encrypted_blob": base64.b64encode(encrypted_blob).decode(),
-                    "sender_encrypted_blob": base64.b64encode(
-                        sender_encrypted_blob
-                    ).decode(),
-                    "signature": base64.b64encode(signature).decode(),
-                    "is_encrypted": True,
-                    "created_at": msg.created_at.isoformat(),
-                    "files": files_payload,
-                },
-            },
-        )
+        if recipient is not None:
+            await manager.send_to_user(recipient.id, frame)
+        else:
+            await manager.broadcast(room_id, frame)
         delivered = True
     except Exception:
         delivered = False
 
-    # 5. If delivered, stamp delivered_at and commit
-    if delivered:
+    # 5. If delivered to a single recipient, stamp delivered_at and commit
+    if delivered and recipient is not None:
         msg.delivered_at = datetime.now(timezone.utc)
         await db.commit()
 

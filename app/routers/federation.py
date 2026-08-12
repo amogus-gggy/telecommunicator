@@ -251,3 +251,98 @@ async def federation_room_message(
         db, room=room, author=author, payload=body.payload
     )
     return {"status": "ok", "room_id": room.id}
+
+
+@router.post("/sender-keys/fetch")
+async def federation_sender_keys_fetch(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve sender-key distribution blobs stored on this server.
+
+    A server only ever returns blobs its own users uploaded, addressed to a
+    room member — the blobs themselves stay opaque (recipient-encrypted).
+    """
+    from app.services import sender_key_service
+
+    raw = await _read_body(request)
+    await verify_request(db, request, raw)
+    try:
+        body = fed.FederationSenderKeysFetchRequest.model_validate_json(raw)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    sender_dict = body.sender.model_dump() if body.sender is not None else None
+    keys = await sender_key_service.get_sender_keys_for_federation(
+        db,
+        body.host_server_name,
+        body.host_room_id,
+        body.recipient.model_dump(),
+        sender_dict,
+    )
+    return {"keys": keys}
+
+
+@router.post("/rooms/{room_id}/membership")
+async def federation_room_membership(
+    room_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Apply an incremental roster change to a mirror room.
+
+    Only the room's hosting server may modify a mirror's roster. Local members
+    of the mirror are notified so group sender keys get rotated.
+    """
+    from app.services import room_service
+    from app.ws.connection_manager import manager as ws_manager
+
+    raw = await _read_body(request)
+    sender = await verify_request(db, request, raw)
+    try:
+        body = fed.FederationMembershipEvent.model_validate_json(raw)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    room = await db.get(Room, room_id)
+    if room is None:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    if room.server_name == SERVER_NAME:
+        raise HTTPException(
+            status_code=403,
+            detail="Membership events only apply to mirror rooms",
+        )
+    if sender.server_name != room.server_name:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the hosting server may change a mirror's roster",
+        )
+
+    member = await _member_to_user(db, body.member)
+    membership = await db.execute(
+        select(RoomMember).where(
+            RoomMember.room_id == room.id, RoomMember.user_id == member.id
+        )
+    )
+    row = membership.scalar_one_or_none()
+
+    if body.event == "add":
+        if row is None:
+            db.add(RoomMember(room_id=room.id, user_id=member.id))
+            await db.commit()
+        event_type = "member_joined"
+        include_ids: list[int] = []
+    else:
+        if row is not None:
+            await db.delete(row)
+            await db.commit()
+        await ws_manager.revoke_access(member.id, room.id)
+        event_type = "member_left"
+        # Tell the removed user too (they may be local to this mirror).
+        include_ids = [member.id]
+
+    await room_service._notify_roster_change(
+        db, room, member, event_type, include_ids=include_ids
+    )
+    return {"status": "ok", "room_id": room.id}

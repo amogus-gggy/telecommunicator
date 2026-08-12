@@ -39,6 +39,37 @@ def _decrypt_file_to_path(
             decryptor.decrypt_file_streaming(src, dst, key_blob_b64, signature_b64, x25519_priv, sender_ed25519_pub)
 
 
+def _decrypt_group_file_to_path(decryptor, src_path: str, dst_path: str, file_key: bytes) -> None:
+    """Group-room file: the raw key came from the sender-key message payload."""
+    with open(src_path, "rb") as src, open(dst_path, "wb") as dst:
+        decryptor.decrypt_file_with_key_streaming(src, dst, file_key)
+
+
+def _apply_group_payload(msg: dict, plaintext: str) -> None:
+    """Set the visible body from a decrypted plaintext.
+
+    Group messages carry a JSON payload with the body plus per-file keys; when
+    detected, the file keys are attached to the message's file entries so the
+    download path can use them.
+    """
+    import json
+
+    try:
+        payload = json.loads(plaintext)
+    except (ValueError, TypeError):
+        msg["body"] = plaintext
+        return
+    if not isinstance(payload, dict) or payload.get("t") != "group-payload":
+        msg["body"] = plaintext
+        return
+    msg["body"] = payload.get("body") or ""
+    files_map = payload.get("files") or {}
+    for f in msg.get("files") or []:
+        key_b64 = files_map.get(str(f.get("id")))
+        if key_b64:
+            f["_group_file_key_b64"] = key_b64
+
+
 def room_view(page: flet.Page, state: AppState) -> None:
     room = state.active_room
     print(f"[room_view] entered, room={room}")
@@ -384,6 +415,10 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 try:
                     url = f"{state.api_url}/rooms/{room.id}/files/{fid}/download"
                     is_encrypted = file_meta.get("is_encrypted")
+                    # Group files carry the raw key in the message payload, so the
+                    # server-side file is opaque (stored as plaintext) — decrypting
+                    # depends on the key marker attached by _apply_group_payload.
+                    is_group_encrypted = bool(file_meta.get("_group_file_key_b64"))
                     is_own = (
                         state.current_user is not None
                         and file_meta.get("uploader_id") == state.current_user.id
@@ -413,8 +448,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
                     download_timeout = httpx.Timeout(connect=5.0, read=300.0, write=10.0, pool=5.0)
 
-                    if is_encrypted:
-                        # Stream → temp file → decrypt → save_path
+                    if is_group_encrypted or is_encrypted:
                         tmp_fd, tmp_path = tempfile.mkstemp(suffix=".enc.tmp")
                         os.close(tmp_fd)
                         try:
@@ -436,7 +470,15 @@ def room_view(page: flet.Page, state: AppState) -> None:
                             page.update()
 
                             decryptor = FileDecryptor()
-                            if is_own and file_meta.get("key_sender_blob"):
+                            if is_group_encrypted:
+                                await asyncio.to_thread(
+                                    _decrypt_group_file_to_path,
+                                    decryptor,
+                                    tmp_path,
+                                    save_path,
+                                    base64.b64decode(file_meta["_group_file_key_b64"]),
+                                )
+                            elif is_own and file_meta.get("key_sender_blob"):
                                 await asyncio.to_thread(
                                     _decrypt_file_to_path, decryptor, tmp_path, save_path,
                                     key_sender_blob_b64=file_meta["key_sender_blob"],
@@ -637,6 +679,21 @@ def room_view(page: flet.Page, state: AppState) -> None:
         if not msg.get("is_encrypted"):
             return msg
 
+        # Fast path: previously decrypted body. Ratchet message keys are burned
+        # once used, so re-displaying history relies on the local plaintext store.
+        try:
+            from crypto.message_store import get_message_store
+
+            _mstore = get_message_store(state)
+            if _mstore is not None and msg.get("id") is not None:
+                _cached = _mstore.get(msg["id"])
+                if _cached is not None:
+                    _apply_group_payload(msg, _cached)
+                    msg["decrypted"] = True
+                    return msg
+        except Exception:  # noqa: BLE001 - store is an optimization, never fatal
+            pass
+
         # If current user is the sender, decrypt using the sender's own copy
         if (
             state.current_user is not None
@@ -656,9 +713,10 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
             try:
                 decryptor = MessageDecryptor()
-                msg["body"] = decryptor.decrypt_own_message(
+                plaintext = decryptor.decrypt_own_message(
                     sender_blob, state.x25519_private
                 )
+                _apply_group_payload(msg, plaintext)
                 msg["decrypted"] = True
             except (InvalidTag, Exception) as exc:
                 logging.error(f"[DECRYPT] Failed to decrypt own message: {exc}")
@@ -667,9 +725,18 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
         # Message is encrypted, attempt to decrypt
         import base64
+        import json
         import logging
         from crypto.message_crypto import MessageDecryptor
         from crypto.key_generator import KeyGenerator
+        from crypto.double_ratchet import KeyConsumedError as DoubleRatchetKeyConsumedError
+        from crypto.message_store import get_message_store
+        from crypto.ratchet_facade import RatchetDecryptor, peek_blob_version
+        from crypto.ratchet_session_store import get_session_store
+        from crypto.sender_keys import (
+            SenderKeyError as SenderKeyGroupError,
+            serialize_blob,
+        )
         from cryptography.exceptions import InvalidSignature, InvalidTag
 
         try:
@@ -727,17 +794,98 @@ def room_view(page: flet.Page, state: AppState) -> None:
                 return msg
 
             logging.info(f"[DECRYPT] Decrypting message from {sender_username}")
-            decryptor = MessageDecryptor()
             encrypted_data = {"blob": encrypted_blob, "signature": signature}
 
-            plaintext = decryptor.decrypt_message(
-                encrypted_msg=encrypted_data,
-                recipient_x25519_priv=state.x25519_private,
-                sender_ed25519_pub=sender_keys["ed25519_pub"],
-            )
+            if peek_blob_version(encrypted_blob) == 3:
+                # Sender-key group message: one ciphertext for the whole room,
+                # decrypted with the per-(room, sender) receive chain.
+                from crypto.sender_key_store import get_sender_key_store
+                from crypto.sender_keys import (
+                    SenderKeyError,
+                    UnknownGenerationError,
+                    decrypt_group_message,
+                    peek_group_generation,
+                    unwrap_distribution,
+                )
+
+                # The signature covers the canonical blob bytes the sender signed.
+                sender_keys["ed25519_pub"].verify(
+                    base64.b64decode(signature),
+                    serialize_blob(json.loads(base64.b64decode(encrypted_blob))),
+                )
+
+                sk_store = get_sender_key_store(state)
+                if sk_store is None:
+                    raise SenderKeyError("sender key store unavailable")
+
+                gen = peek_group_generation(encrypted_blob)
+                if gen is None:
+                    raise SenderKeyError("malformed group blob")
+
+                chain = sk_store.get_peer(room.id, sender_username, gen)
+                if chain is None:
+                    # No receive chain for this generation — fetch the sender's
+                    # distribution blob and unwrap it with our identity key.
+                    fetch_client = APIClient(state=state)
+                    try:
+                        info = await fetch_client.get_sender_keys(
+                            room.id, sender=sender_username
+                        )
+                    finally:
+                        await fetch_client.aclose()
+                    entry = next(
+                        (
+                            k
+                            for k in (info.get("keys") or [])
+                            if int(k.get("generation", -1)) == gen
+                        ),
+                        None,
+                    )
+                    if entry is None:
+                        raise UnknownGenerationError(
+                            f"no sender key for generation {gen}"
+                        )
+                    chain = unwrap_distribution(entry["blob"], state.x25519_private)
+                    sk_store.put_peer(room.id, sender_username, chain)
+
+                payload_bytes, new_chain = decrypt_group_message(encrypted_blob, chain)
+                sk_store.put_peer(room.id, sender_username, new_chain)
+
+                plaintext = payload_bytes.decode("utf-8")
+                _apply_group_payload(msg, plaintext)
+                msg["decrypted"] = True
+                try:
+                    _ms = get_message_store(state)
+                    if _ms is not None and msg.get("id") is not None:
+                        _ms.put(msg["id"], plaintext)
+                except Exception:  # noqa: BLE001 - persistence is best-effort
+                    logging.warning("[DECRYPT] Failed to persist plaintext to store")
+                return msg
+
+            if peek_blob_version(encrypted_blob) >= 2:
+                plaintext = RatchetDecryptor().decrypt_message(
+                    encrypted_data,
+                    peer_key=sender_username,
+                    recipient_x25519_priv=state.x25519_private,
+                    sender_ed25519_pub=sender_keys["ed25519_pub"],
+                    sender_x25519_pub=sender_keys["x25519_pub"],
+                    store=get_session_store(state),
+                )
+            else:
+                plaintext = MessageDecryptor().decrypt_message(
+                    encrypted_msg=encrypted_data,
+                    recipient_x25519_priv=state.x25519_private,
+                    sender_ed25519_pub=sender_keys["ed25519_pub"],
+                )
 
             msg["body"] = plaintext
             msg["decrypted"] = True
+            try:
+                _ms = get_message_store(state)
+                if _ms is not None and msg.get("id") is not None:
+                    _ms.put(msg["id"], plaintext)
+            except Exception:  # noqa: BLE001 - persistence is best-effort
+                logging.warning("[DECRYPT] Failed to persist plaintext to store")
             logging.info("[DECRYPT] Message decrypted successfully")
             return msg
 
@@ -751,6 +899,20 @@ def room_view(page: flet.Page, state: AppState) -> None:
         except InvalidTag:
             logging.error(
                 f"[DECRYPT] Decryption failed for message from {sender_username}"
+            )
+            msg["body"] = t("room.encrypted_bad_key")
+            msg["decryption_error"] = True
+            return msg
+        except DoubleRatchetKeyConsumedError:
+            logging.warning(
+                f"[DECRYPT] Ratchet key already consumed for message from {sender_username}"
+            )
+            msg["body"] = t("room.encrypted_key_gone")
+            msg["decryption_error"] = True
+            return msg
+        except SenderKeyGroupError as exc:
+            logging.warning(
+                f"[DECRYPT] Sender-key group decrypt failed for message from {sender_username}: {exc}"
             )
             msg["body"] = t("room.encrypted_bad_key")
             msg["decryption_error"] = True
@@ -790,13 +952,43 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
             async def decrypt_and_display_encrypted():
                 decrypted_msg = await _decrypt_message_if_needed(msg)
-                _state["messages_data"].append(decrypted_msg)
-                message_control = _build_message_tile(decrypted_msg)
-                messages_list.controls.append(message_control)
-                reconnecting_banner.visible = False
-                _animate_message(message_control)
+
+                # Own optimistic tile already shown — replace rather than append.
+                is_own_message = (
+                    state.current_user is not None
+                    and decrypted_msg.get("author_username")
+                    == state.current_user.username
+                )
+                already_exists = False
+                if is_own_message:
+                    for i, existing_msg in enumerate(_state["messages_data"]):
+                        if (
+                            existing_msg.get("temp_id")
+                            == decrypted_msg.get("temp_id")
+                            or existing_msg.get("is_optimistic")
+                        ):
+                            # Keep the visible body from the optimistic tile.
+                            if decrypted_msg.get("is_encrypted"):
+                                decrypted_msg["body"] = existing_msg.get(
+                                    "body", decrypted_msg.get("body", "")
+                                )
+                            _state["messages_data"][i] = decrypted_msg
+                            messages_list.controls[i] = _build_message_tile(
+                                decrypted_msg
+                            )
+                            already_exists = True
+                            print("[WS] Replaced optimistic message with real one")
+                            break
+
+                if not already_exists:
+                    _state["messages_data"].append(decrypted_msg)
+                    message_control = _build_message_tile(decrypted_msg)
+                    messages_list.controls.append(message_control)
+                    reconnecting_banner.visible = False
+                    _animate_message(message_control)
+
                 page.update()
-                if _is_user_at_bottom():
+                if not already_exists and _is_user_at_bottom():
                     page.run_task(_smooth_scroll_to_bottom)
 
             page.run_task(decrypt_and_display_encrypted)
@@ -1089,10 +1281,121 @@ def room_view(page: flet.Page, state: AppState) -> None:
             print("[SEND] Sending message...")
             client = APIClient(state=state)
 
+            async def _send_group_encrypted(api, body_text, uploaded, file_keys):
+                import base64
+                import json
+                from crypto.key_generator import KeyGenerator
+                from crypto.ratchet_facade import RatchetEncryptor
+                from crypto.sender_key_store import get_sender_key_store
+                from crypto.sender_keys import (
+                    ROTATION_INTERVAL,
+                    encrypt_group_message,
+                    rotate_chain,
+                    roster_digest,
+                    serialize_blob,
+                    wrap_distribution,
+                )
+
+                sk_store = get_sender_key_store(state)
+                if sk_store is None:
+                    raise RuntimeError("Sender key store unavailable")
+
+                # Refresh roster so rotation sees joins/leaves that happened while open
+                room_data = await api.get_room(room.id)
+                participants = room_data.get("participants") or []
+                if not participants:
+                    raise RuntimeError("Room has no participants")
+                digest = roster_digest(participants)
+
+                chain = sk_store.get_own(room.id)
+                need_rotation = (
+                    chain is None
+                    or chain.iteration >= ROTATION_INTERVAL
+                    or sk_store.get_roster(room.id) != digest
+                )
+                if need_rotation:
+                    chain = rotate_chain(chain)
+                    my_username = state.current_user.username
+                    entries = []
+                    for handle in participants:
+                        if handle.split("@", 1)[0] == my_username:
+                            continue  # own copy is stateless (sender blob)
+                        keys = None
+                        if state.public_key_cache:
+                            keys = state.public_key_cache.get_public_keys(handle)
+                        if not keys:
+                            try:
+                                kd = await api.get_public_keys(handle)
+                            except Exception as key_exc:
+                                logging.warning(f"[GROUP] No public keys for {handle}: {key_exc}")
+                                continue
+                            ed_pub = KeyGenerator.load_ed25519_public_key(
+                                base64.b64decode(kd["identity_pub_ed25519"])
+                            )
+                            x_pub = KeyGenerator.load_x25519_public_key(
+                                base64.b64decode(kd["identity_pub_x25519"])
+                            )
+                            keys = {"ed25519_pub": ed_pub, "x25519_pub": x_pub}
+                            if state.public_key_cache:
+                                state.public_key_cache.set_public_keys(
+                                    handle, ed_pub, x_pub, str(kd.get("user_id", ""))
+                                )
+                        blob = wrap_distribution(chain, keys["x25519_pub"])
+                        entries.append({
+                            "recipient_username": handle,
+                            "generation": chain.generation,
+                            "blob": blob,
+                        })
+                    if entries:
+                        await api.put_sender_keys(room.id, entries)
+                    sk_store.put_roster(room.id, digest)
+
+                # Group payload: body + file keys ride inside the ciphertext
+                files_map = {}
+                for fmeta, raw_key in zip(uploaded, file_keys):
+                    if raw_key is not None and fmeta.get("id") is not None:
+                        files_map[str(fmeta["id"])] = base64.b64encode(raw_key).decode("ascii")
+                payload = {"t": "group-payload", "v": 1, "body": body_text, "files": files_map}
+                payload_bytes = json.dumps(
+                    payload, sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+
+                blob_dict, message_key, new_chain = encrypt_group_message(
+                    chain, payload_bytes
+                )
+                sk_store.put_own(room.id, new_chain)
+
+                blob_bytes = serialize_blob(blob_dict)
+                signature = state.ed25519_private.sign(blob_bytes)
+                sender_blob_bytes = RatchetEncryptor._build_sender_blob(
+                    message_key,
+                    payload_bytes,
+                    state.x25519_private,
+                    str(state.current_user.id),
+                    str(room.id),
+                )
+
+                await api.send_group_encrypted_message(
+                    room_id=room.id,
+                    encrypted_blob_b64=base64.b64encode(blob_bytes).decode("ascii"),
+                    sender_encrypted_blob_b64=base64.b64encode(sender_blob_bytes).decode("ascii"),
+                    signature_b64=base64.b64encode(signature).decode("ascii"),
+                    file_ids=[f["id"] for f in uploaded if f.get("id")],
+                )
+
             try:
                 # Upload files first (streaming — no full file in memory)
                 uploaded_files = []
                 is_personal = room.room_type == "personal"
+                is_group = room.room_type in ("group", "public")
+                group_e2ee = (
+                    is_group
+                    and bool(state.ed25519_private)
+                    and bool(state.x25519_private)
+                    and state.current_user is not None
+                )
+                # Raw group file keys, parallel to uploaded_files (None = plaintext)
+                group_file_keys: list[bytes | None] = []
 
                 # Resolve E2EE recipient keys once for all files
                 e2ee_recipient_keys = None
@@ -1132,7 +1435,27 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     key_sender_blob = None
                     key_signature = None
 
-                    if e2ee_recipient_keys and state.ed25519_private and state.x25519_private and state.current_user:
+                    if group_e2ee:
+                        # Group: file key travels inside the sender-key message payload
+                        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".enc")
+                        tmp_path = tmp.name
+                        tmp.close()
+                        try:
+                            enc = FileEncryptor()
+
+                            def _do_encrypt():
+                                with open(tmp_path, "wb") as dst_f:
+                                    return enc.encrypt_file_group_streaming(file_path, dst_f)
+
+                            raw_key = await asyncio.to_thread(_do_encrypt)
+                            group_file_keys.append(raw_key)
+                            upload_path = tmp_path
+                        except Exception as enc_exc:
+                            logging.error(f"[FILE] Group encryption failed: {enc_exc}", exc_info=True)
+                            upload_path = file_path  # fall back to plaintext
+                            tmp_path = None
+                            group_file_keys.append(None)
+                    elif e2ee_recipient_keys and state.ed25519_private and state.x25519_private and state.current_user:
                         # Stream-encrypt into a temp file — never loads full file into memory
                         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".enc")
                         tmp_path = tmp.name
@@ -1160,9 +1483,11 @@ def room_view(page: flet.Page, state: AppState) -> None:
                             logging.error(f"[FILE] Encryption failed: {enc_exc}", exc_info=True)
                             upload_path = file_path  # fall back to plaintext
                             tmp_path = None
+                        group_file_keys.append(None)
                     else:
                         upload_path = file_path
                         tmp_path = None
+                        group_file_keys.append(None)
 
                     try:
                         # Stream upload with progress via _TrackingFile wrapper
@@ -1245,7 +1570,8 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     try:
                         import base64
                         import logging
-                        from crypto.message_crypto import MessageEncryptor
+                        from crypto.ratchet_facade import RatchetEncryptor
+                        from crypto.ratchet_session_store import get_session_store
                         from crypto.key_generator import KeyGenerator
 
                         # Fetch recipient public keys
@@ -1298,14 +1624,16 @@ def room_view(page: flet.Page, state: AppState) -> None:
                         logging.info(
                             f"[SEND] Encrypting message for {recipient_username}"
                         )
-                        encryptor = MessageEncryptor()
+                        encryptor = RatchetEncryptor()
                         encrypted_data = encryptor.encrypt_message(
                             plaintext=resolved_body,
-                            recipient_x25519_pub=recipient_keys["x25519_pub"],
+                            peer_key=recipient_username,
+                            peer_identity_x25519_pub=recipient_keys["x25519_pub"],
                             sender_ed25519_priv=state.ed25519_private,
-                            sender_x25519_pub=state.x25519_private.public_key(),
+                            sender_x25519_priv=state.x25519_private,
                             sender_id=str(state.current_user.id),
                             recipient_id=recipient_id,
+                            store=get_session_store(state),
                         )
 
                         # Send encrypted message via API
@@ -1334,8 +1662,26 @@ def room_view(page: flet.Page, state: AppState) -> None:
                                 messages_list.controls.pop()
                         snack(page, t("room.send_error", exc=enc_exc), ok=False)
                         return
+                elif group_e2ee:
+                    try:
+                        await _send_group_encrypted(
+                            client, resolved_body, uploaded_files, group_file_keys
+                        )
+                    except Exception as enc_exc:
+                        logging.error(
+                            f"[SEND] Group encryption/send failed: {enc_exc}", exc_info=True
+                        )
+                        # Remove the optimistic message — it was never delivered
+                        if _state["messages_data"] and _state["messages_data"][-1].get(
+                            "is_optimistic"
+                        ):
+                            _state["messages_data"].pop()
+                            if messages_list.controls:
+                                messages_list.controls.pop()
+                        snack(page, t("room.send_error", exc=enc_exc), ok=False)
+                        return
                 else:
-                    # Send plaintext via WebSocket (group chat or no keys)
+                    # Send plaintext via WebSocket (no E2EE keys available)
                     print("[SEND] Sending plaintext message via WebSocket")
                     await ws.send_message(room.id, resolved_body, files=uploaded_files)
 
@@ -1391,12 +1737,39 @@ def room_view(page: flet.Page, state: AppState) -> None:
 
     state.on_alignment_change = _rebuild_messages
 
+    def _on_notification(payload: dict) -> None:
+        """Refresh the roster when members join/leave the open room."""
+        evt_type = payload.get("type")
+        if evt_type not in ("member_joined", "member_left", "member_removed"):
+            return
+        evt = payload.get("payload") or {}
+        if evt.get("room_id") != room.id:
+            return
+
+        async def _refresh() -> None:
+            client = APIClient(state=state)
+            try:
+                updated = await client.get_room(room.id)
+            except Exception as exc:
+                logging.warning(f"[WS] Roster refresh failed: {exc}")
+                return
+            finally:
+                await client.aclose()
+
+            room.participants = updated.get("participants", room.participants)
+            room.member_count = updated.get("member_count", room.member_count)
+            subtitle_text.value = _get_subtitle()
+            page.update()
+
+        page.run_task(_refresh)
+
     async def _start_ws() -> None:
         current_room = getattr(state.ws, "_room_id", None) if state.ws else None
         if state.ws is not None and current_room == room.id:
             # Same room and socket already subscribed — reuse connection.
             state.ws._on_room_message = _on_ws_message
             state.ws._on_reconnecting = _on_reconnecting
+            state.ws._on_notification = _on_notification
             state.ws.set_room(room.id)
             _state["ws_client"] = state.ws
             logger.debug(
@@ -1410,6 +1783,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         if state.ws is not None:
             state.ws._on_room_message = None
             state.ws._on_reconnecting = None
+            state.ws._on_notification = None
             state.ws.close()
             state.ws = None
 
@@ -1418,6 +1792,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
             token=state.token or "",
             on_room_message=_on_ws_message,
             on_reconnecting=_on_reconnecting,
+            on_notification=_on_notification,
             ws_url=state.ws_url,
         )
         ws.set_room(room.id)
@@ -1430,6 +1805,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
         if state.ws is not None:
             state.ws._on_room_message = None
             state.ws._on_reconnecting = None
+            state.ws._on_notification = None
             state.ws.set_room(None)
         state.on_alignment_change = None
         _state["ws_client"] = None
@@ -1537,7 +1913,11 @@ def room_view(page: flet.Page, state: AppState) -> None:
         else:
             return t("room.public_subtitle", count=room.member_count)
 
-    subtitle = _get_subtitle()
+    subtitle_text = flet.Text(
+        _get_subtitle(),
+        size=12.5,
+        color=flet.Colors.ON_SURFACE_VARIANT,
+    )
 
     top_bar_controls: list[flet.Control] = [
         flet.IconButton(
@@ -1555,11 +1935,7 @@ def room_view(page: flet.Page, state: AppState) -> None:
                     weight=flet.FontWeight.W_600,
                     color=flet.Colors.ON_SURFACE,
                 ),
-                flet.Text(
-                    subtitle,
-                    size=12.5,
-                    color=flet.Colors.ON_SURFACE_VARIANT,
-                ),
+                subtitle_text,
             ],
             spacing=0,
             tight=True,

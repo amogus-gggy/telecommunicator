@@ -518,6 +518,36 @@ async def send_permissions_event(
     )
 
 
+async def fetch_sender_keys_from_server(
+    db: AsyncSession,
+    server: Server,
+    *,
+    host_server_name: str,
+    host_room_id: int,
+    recipient: dict,
+    sender: dict | None = None,
+) -> list[dict]:
+    """Fetch sender-key distribution blobs addressed to ``recipient``.
+
+    The room is addressed by the hosting server's coordinates; the contacted
+    server maps them to its own local room (hosted or mirrored) and returns
+    the blobs its own users uploaded.
+    """
+    body: dict = {
+        "host_server_name": host_server_name,
+        "host_room_id": host_room_id,
+        "recipient": recipient,
+    }
+    if sender is not None:
+        body["sender"] = sender
+    response = await _send_with_retry(
+        db, server, "POST", "/federation/sender-keys/fetch", body, attempts=2
+    )
+    info = response.json()
+    keys = info.get("keys")
+    return keys if isinstance(keys, list) else []
+
+
 async def send_history_sync(
     db: AsyncSession,
     server: Server,

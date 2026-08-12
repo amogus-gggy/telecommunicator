@@ -80,6 +80,11 @@ class AppState:
     x25519_private: "X25519PrivateKey | None" = field(default=None, repr=False)
     old_x25519_private: "X25519PrivateKey | None" = field(default=None, repr=False)
     public_key_cache: "PublicKeyCache | None" = field(default=None, repr=False)
+    # Double Ratchet per-peer sessions and decrypted-message store (lazy singletons)
+    ratchet_sessions: Any = field(default=None, repr=False)
+    message_store: Any = field(default=None, repr=False)
+    # Sender-key group chains (lazy singleton, per account)
+    sender_key_store: Any = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if not self.api_url or not self.ws_url:
@@ -150,5 +155,8 @@ class AppState:
         self.ed25519_private = None
         self.x25519_private = None
         self.old_x25519_private = None
+        self.ratchet_sessions = None
+        self.message_store = None
+        self.sender_key_store = None
         if self.public_key_cache is not None:
             self.public_key_cache.clear()

@@ -55,8 +55,6 @@ en:
     alignment_left: "All left"
     alignment_right: "All right"
     setting_saved: "Setting saved"
-    server_settings: "Server Settings"
-    server_url: "Server URL"
 
   language:
     title: "Interface language"
@@ -71,6 +69,7 @@ en:
 
   chat_list:
     title: "Chats"
+    logged_as: "Logged in as: %{user}"
     search: "Search chats"
     tab_personal: "Personal"
     tab_groups: "Groups"
@@ -144,6 +143,7 @@ en:
     encrypted_malformed: "🔒 [Encrypted message — malformed]"
     encrypted_bad_signature: "⚠️ [Security warning: message signature invalid]"
     encrypted_bad_key: "🔒 [Decryption error: invalid key or tampered message]"
+    encrypted_key_gone: "🔒 [Encrypted message — key no longer available]"
     encrypted_error: "🔒 [Decryption error: %{exc}]"
     send_error: "Failed to send message: %{exc}"
 

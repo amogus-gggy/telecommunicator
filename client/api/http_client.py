@@ -268,6 +268,10 @@ class APIClient:
     async def leave_room(self, room_id: int) -> None:
         await self._post(f"/rooms/{room_id}/leave")
 
+    async def get_room(self, room_id: int) -> dict:
+        r = await self._get(f"/rooms/{room_id}")
+        return r.json()
+
     async def invite_user(self, room_id: int, username: str) -> None:
         await self._post(f"/rooms/{room_id}/invite/{username}")
 
@@ -371,6 +375,53 @@ class APIClient:
         if since is not None:
             params["since"] = since
         r = await self._get("/messages", params=params)
+        return r.json()
+
+    async def send_group_encrypted_message(
+        self,
+        room_id: int,
+        encrypted_blob_b64: str,
+        sender_encrypted_blob_b64: str,
+        signature_b64: str,
+        file_ids: list[int] | None = None,
+    ) -> dict:
+        """Send a sender-key (v3) group message — one ciphertext for the room."""
+        payload = {
+            "room_id": room_id,
+            "encrypted_blob": encrypted_blob_b64,
+            "sender_encrypted_blob": sender_encrypted_blob_b64,
+            "signature": signature_b64,
+            "file_ids": file_ids or [],
+        }
+        timeout = httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0)
+        try:
+            r = await self._post("/messages", json=payload, timeout=timeout)
+        except httpx.ReadTimeout:
+            logger.warning(
+                "[APIClient] ReadTimeout on POST /messages, retrying with fresh connection"
+            )
+            _shared_clients.pop(self.base_url, None)
+            self._client = _get_shared_http_client(self.base_url)
+            r = await self._post("/messages", json=payload, timeout=timeout)
+        return r.json()
+
+    async def put_sender_keys(
+        self, room_id: int, entries: list[dict]
+    ) -> dict:
+        """Upload sender-key distribution blobs (one per member)."""
+        r = await self._put(
+            f"/rooms/{room_id}/sender-keys", json={"entries": entries}
+        )
+        return r.json()
+
+    async def get_sender_keys(
+        self, room_id: int, sender: str | None = None
+    ) -> dict:
+        """Fetch sender-key distribution blobs addressed to us for a room."""
+        params: dict[str, Any] = {}
+        if sender is not None:
+            params["sender"] = sender
+        r = await self._get(f"/rooms/{room_id}/sender-keys", params=params)
         return r.json()
 
     async def delete_message(self, message_id: int) -> None:

@@ -244,6 +244,23 @@ class FileEncryptor:
             "signature": b64encode(signature_bytes).decode("ascii"),
         }
 
+    def encrypt_file_group_streaming(
+        self,
+        src_path: str,
+        dst: BinaryIO,
+        file_key: bytes | None = None,
+    ) -> bytes:
+        """Stream-encrypt *src_path* into *dst* and return the raw file key.
+
+        Used for group rooms: the key travels inside the sender-key message
+        payload instead of a per-recipient key blob.
+        """
+        if file_key is None:
+            file_key = os.urandom(32)
+        with open(src_path, "rb") as src:
+            encrypt_stream(src, dst, file_key)
+        return file_key
+
     # Keep old in-memory API for backwards compat (small files / tests)
     def encrypt_file(
         self,
@@ -307,6 +324,15 @@ class FileDecryptor:
         x25519_priv: X25519PrivateKey,
     ) -> None:
         file_key = self._unwrap_key(b64decode(key_sender_blob_b64), x25519_priv)
+        decrypt_stream(src, dst, file_key)
+
+    def decrypt_file_with_key_streaming(
+        self,
+        src: BinaryIO,
+        dst: BinaryIO,
+        file_key: bytes,
+    ) -> None:
+        """Decrypt a group-room file whose key came from the message payload."""
         decrypt_stream(src, dst, file_key)
 
     @staticmethod

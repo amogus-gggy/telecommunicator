@@ -80,6 +80,19 @@ class FederationMembershipEvent(BaseModel):
     member: FederationMember
 
 
+class FederationSenderKeysFetchRequest(BaseModel):
+    """Ask a homeserver for sender-key blobs it stores for ``recipient``.
+
+    The room is addressed by the hosting server's coordinates; the contacted
+    server maps them onto its own hosted/mirrored room.
+    """
+
+    host_server_name: str
+    host_room_id: int
+    recipient: FederationMember
+    sender: FederationMember | None = None
+
+
 class FederationPermissionsEvent(BaseModel):
     """Room settings pushed by the hosting server to a mirror."""
 
