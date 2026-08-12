@@ -55,8 +55,6 @@ en:
     alignment_left: "All left"
     alignment_right: "All right"
     setting_saved: "Setting saved"
-    server_settings: "Server Settings"
-    server_url: "Server URL"
 
   language:
     title: "Interface language"
@@ -71,6 +69,7 @@ en:
 
   chat_list:
     title: "Chats"
+    logged_as: "Logged in as: %{user}"
     search: "Search chats"
     tab_personal: "Personal"
     tab_groups: "Groups"

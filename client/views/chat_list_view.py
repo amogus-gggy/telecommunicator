@@ -538,14 +538,33 @@ def chat_list_view(page: flet.Page, state: AppState) -> None:
         if state.ws is not None:
             state.ws._on_notification = None
 
+    def _logged_as() -> str:
+        user = state.current_user
+        if user is None:
+            return ""
+        handle = (
+            f"{user.username}@{user.server_name}" if user.server_name else user.username
+        )
+        return t("chat_list.logged_as", user=handle)
+
     top_bar = flet.Container(
         content=flet.Row(
             controls=[
-                flet.Text(
-                    t("chat_list.title"),
-                    size=22,
-                    weight=flet.FontWeight.BOLD,
-                    color=flet.Colors.ON_SURFACE,
+                flet.Column(
+                    controls=[
+                        flet.Text(
+                            t("chat_list.title"),
+                            size=22,
+                            weight=flet.FontWeight.BOLD,
+                            color=flet.Colors.ON_SURFACE,
+                        ),
+                        flet.Text(
+                            _logged_as(),
+                            size=12,
+                            color=flet.Colors.ON_SURFACE_VARIANT,
+                        ),
+                    ],
+                    spacing=0,
                     expand=True,
                 ),
                 flet.IconButton(

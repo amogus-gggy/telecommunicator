@@ -229,35 +229,6 @@ def profile_view(page: flet.Page, state: AppState) -> None:
         set_theme_mode(page, new_mode)
         snack(page, t("profile.setting_saved"))
 
-    # --- Server setting ---
-    server_url_field = themed_field(
-        label=t("profile.server_url"),
-        value=state.api_url,
-        expand=True,
-    )
-
-    async def _save_server_url(e: flet.ControlEvent) -> None:
-        new_url = server_url_field.value.rstrip("/")
-        if new_url == state.api_url:
-            return
-
-        state.api_url = new_url
-        if "://" in new_url:
-            proto, rest = new_url.split("://", 1)
-            ws_proto = "ws" if proto == "http" else "wss"
-            state.ws_url = f"{ws_proto}://{rest}/ws"
-        else:
-            state.ws_url = f"ws://{new_url}/ws"
-
-        if state.secure_storage:
-            state.secure_storage.set("settings.api_url", state.api_url)
-            state.secure_storage.set("settings.ws_url", state.ws_url)
-
-        # Logout and redirect to login as switching server kills current session
-        await state.logout()
-        from views.login_view import login_view
-        login_view(page, state)
-
     def _info_row(icon: str, text: flet.Control | str) -> flet.Row:
         return flet.Row(
             controls=[
@@ -271,6 +242,10 @@ def profile_view(page: flet.Page, state: AppState) -> None:
 
     avatar_name = (
         (user.display_name or user.username) if user else "?"
+    )
+
+    username_handle = (
+        f"{user.username}@{user.server_name}" if user and user.server_name else (user.username if user else "")
     )
 
     page.controls.clear()
@@ -292,9 +267,7 @@ def profile_view(page: flet.Page, state: AppState) -> None:
                                                         flet.Icons.BADGE,
                                                         t(
                                                             "profile.username",
-                                                            username=user.username
-                                                            if user
-                                                            else "",
+                                                            username=username_handle,
                                                         ),
                                                     ),
                                                     _info_row(
@@ -375,17 +348,6 @@ def profile_view(page: flet.Page, state: AppState) -> None:
                                     primary_button(
                                         t("profile.save"),
                                         on_click=_save_theme,
-                                    ),
-                                ]
-                            ),
-                            _section_card(
-                                [
-                                    _section_title(t("profile.server_settings")),
-                                    _section_divider(),
-                                    server_url_field,
-                                    primary_button(
-                                        t("profile.save"),
-                                        on_click=_save_server_url,
                                     ),
                                 ]
                             ),
