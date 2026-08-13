@@ -12,7 +12,7 @@
 
 | Feature | Description                                                                                                  |
 |---------|--------------------------------------------------------------------------------------------------------------|
-| 🔒 **End-to-End Encryption** | Messages encrypted using Signal Protocol's Double Ratchet algorithm(only for DMs, group e2ee is in progress) |
+| 🔒 **End-to-End Encryption** | Messages encrypted using modified Signal protocols|
 | 🏠 **Self-Hosted** | Full control over your data with Docker deployment                                                           |
 | 📱 **Cross-Platform Client** | Available for mobile (Android/iOS) and desktop via Flet                                                      |
 | 🌐 **Federation Support** | Multi-server federation capabilities(like matrix)                                                            |
