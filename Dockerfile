@@ -8,8 +8,8 @@ WORKDIR /app
 
 RUN addgroup --system app && adduser --system --ingroup app app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements-server.txt .
+RUN pip install --no-cache-dir -r requirements-server.txt
 
 COPY --chown=app:app alembic.ini .
 COPY --chown=app:app alembic ./alembic
@@ -23,4 +23,4 @@ USER app
 EXPOSE 8000
 
 # Alembic migrations run automatically on startup (see app/main.py lifespan).
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "granian --interface asgi --host 0.0.0.0 --port ${PORT:-8000} app.main:app"]
