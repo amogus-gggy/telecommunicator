@@ -12,7 +12,7 @@
 
 | Feature | Description                                                                                                  |
 |---------|--------------------------------------------------------------------------------------------------------------|
-| 🔒 **End-to-End Encryption** | Messages encrypted using Signal Protocol's Double Ratchet algorithm(only for DMs, group e2ee is in progress) |
+| 🔒 **End-to-End Encryption** | Messages encrypted using modified Signal protocols|
 | 🏠 **Self-Hosted** | Full control over your data with Docker deployment                                                           |
 | 📱 **Cross-Platform Client** | Available for mobile (Android/iOS) and desktop via Flet                                                      |
 | 🌐 **Federation Support** | Multi-server federation capabilities(like matrix)                                                            |
@@ -171,9 +171,9 @@ docker compose -f docker-compose.federation.yml up -d
 
 ---
 
-## 🚀 Future Development Roadmap
+## 🚀 TODO's
 
-### Planned Features
+
 
 #### Automatic Node Setup
 - [ ] Deploy server nodes on VPS directly through mobile app
@@ -181,16 +181,11 @@ docker compose -f docker-compose.federation.yml up -d
 - [ ] Automated SSL/TLS certificate management
 - [ ] Health monitoring and auto-recovery
 
-#### Group E2EE
-- [ ] Implement end-to-end encryption for group chats
-- [ ] Sender Keys protocol or MLS (Messaging Layer Security)
-- [ ] Secure group member management
-- [ ] Encrypted group metadata
+#### Group E2EE - implemented fully
 
 #### Flutter Client Rewrite
 - [ ] Migrate from Flet to native Flutter
-- [ ] Reason: Technical limitations with Flet on mobile platforms
-- [ ] Benefits: Better performance, native feel, broader platform support
+Benefits: Better performance, native feel, broader platform support
 - [ ] Improved battery efficiency and resource usage
 
 #### Backend Optimization
@@ -199,7 +194,8 @@ docker compose -f docker-compose.federation.yml up -d
 - [ ] Connection pooling enhancements
 - [ ] Caching strategies for frequently accessed data
 - [ ] Code refactoring and technical debt reduction
-- [ ] Enhanced monitoring and logging
+- [+] Enhanced monitoring and logging(good enough rn)
+- [ ] Fix application logic to allow 2 or more workers on the same machine
 
 ---
 
