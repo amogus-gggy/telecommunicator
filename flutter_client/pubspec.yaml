@@ -1,0 +1,25 @@
+name: flutter_client
+description: Native Flutter client for Telecommunicator (self-hosted E2EE messenger).
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.2
+  web_socket_channel: ^3.0.1
+  cryptography: ^2.7.0
+  shared_preferences: ^2.3.2
+  path_provider: ^2.1.4
+  file_picker: ^8.1.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
