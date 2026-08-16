@@ -1,13 +1,18 @@
 /// Sender-key group store (persisted encrypted at rest).
 ///
 /// Holds, per room: the local user's sending chain, the roster digest, and a
-/// map of (sender handle, generation) -> receive chain.
+/// map of (sender handle) -> list of receive chains. Receiving chains keep the
+/// last [_keepGenerations] generations so in-flight messages from a
+/// just-rotated sender still decrypt (mirrors the Python client's
+/// `sender_key_store`).
 library;
 
 import 'dart:io';
 
 import 'at_rest.dart';
 import 'sender_keys.dart';
+
+const int _keepGenerations = 3;
 
 abstract class SenderKeyStore {
   Future<SenderChainState?> getOwn(int roomId);
@@ -26,8 +31,10 @@ class FileSenderKeyStore implements SenderKeyStore {
 
   final Map<int, SenderChainState> _own = {};
   final Map<int, String> _roster = {};
-  final Map<String, SenderChainState> _peers = {}; // key: "$roomId|$sender|$gen"
+  final Map<String, List<SenderChainState>> _peers = {}; // key: "$roomId|$sender"
   bool _loaded = false;
+
+  static String _peerKey(int roomId, String sender) => '$roomId|$sender';
 
   Future<void> _ensureLoaded() async {
     if (_loaded) return;
@@ -48,8 +55,18 @@ class FileSenderKeyStore implements SenderKeyStore {
         }
         final peers = obj['peers'] as Map? ?? {};
         for (final e in peers.entries) {
-          _peers[e.key as String] =
-              SenderChainState.fromDict(e.value as Map<String, dynamic>);
+          final raw = e.value;
+          final loaded = <SenderChainState>[];
+          if (raw is List) {
+            for (final c in raw) {
+              if (c is Map<String, dynamic>) {
+                loaded.add(SenderChainState.fromDict(c));
+              }
+            }
+          } else if (raw is Map<String, dynamic>) {
+            loaded.add(SenderChainState.fromDict(raw));
+          }
+          if (loaded.isNotEmpty) _peers[e.key as String] = loaded;
         }
       }
     }
@@ -59,7 +76,10 @@ class FileSenderKeyStore implements SenderKeyStore {
     final map = {
       'own': {for (final e in _own.entries) e.key.toString(): e.value.toDict()},
       'roster': {for (final e in _roster.entries) e.key.toString(): e.value},
-      'peers': {for (final e in _peers.entries) e.key: e.value.toDict()},
+      'peers': {
+        for (final e in _peers.entries)
+          e.key: [for (final c in e.value) c.toDict()],
+      },
     };
     final sealed = await seal(_storageKey, map);
     final f = File(_path);
@@ -96,13 +116,24 @@ class FileSenderKeyStore implements SenderKeyStore {
   @override
   Future<SenderChainState?> getPeer(int roomId, String sender, int generation) async {
     await _ensureLoaded();
-    return _peers['$roomId|$sender|$generation'];
+    for (final c in _peers[_peerKey(roomId, sender)] ?? const []) {
+      if (c.generation == generation) return c;
+    }
+    return null;
   }
 
   @override
   Future<void> putPeer(int roomId, String sender, SenderChainState state) async {
     await _ensureLoaded();
-    _peers['$roomId|$sender|${state.generation}'] = state;
+    final key = _peerKey(roomId, sender);
+    final chains = [
+      for (final c in _peers[key] ?? const <SenderChainState>[])
+        if (c.generation != state.generation) c,
+      state,
+    ]..sort((a, b) => a.generation.compareTo(b.generation));
+    _peers[key] = chains.length > _keepGenerations
+        ? chains.sublist(chains.length - _keepGenerations)
+        : chains;
     await _flush();
   }
 }

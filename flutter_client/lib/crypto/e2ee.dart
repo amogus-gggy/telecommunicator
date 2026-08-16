@@ -282,11 +282,20 @@ class E2EE {
       }
       msg['body'] = payload['body'] as String? ?? '';
       final filesMap = (payload['files'] as Map? ?? {});
-      for (final f in (msg['files'] as List? ?? [])) {
-        final id = (f as Map)['id'];
-        final keyB64 = filesMap[id.toString()];
-        if (keyB64 != null) f['_group_file_key_b64'] = keyB64;
+      final files = msg['files'] as List? ?? [];
+      final byId = <String, Map<String, dynamic>>{};
+      for (final f in files) {
+        final fm = (f as Map).cast<String, dynamic>();
+        final id = fm['id'];
+        if (id != null) byId[id.toString()] = fm;
       }
+      filesMap.forEach((id, keyB64) {
+        final entry = byId[id.toString()] ??
+            <String, dynamic>{'id': int.tryParse(id.toString()) ?? id};
+        entry['_group_file_key_b64'] = keyB64.toString();
+        byId[id.toString()] = entry;
+      });
+      msg['files'] = byId.values.toList();
     } catch (_) {
       msg['body'] = plaintext;
     }
