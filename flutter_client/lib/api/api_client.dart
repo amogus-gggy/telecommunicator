@@ -313,6 +313,7 @@ class ApiClient {
   Future<Map<String, dynamic>> uploadFile(
     int roomId,
     File file, {
+    String? filename,
     String? keyBlob,
     String? keySenderBlob,
     String? keySignature,
@@ -321,9 +322,14 @@ class ApiClient {
     final size = await file.length();
     final uri = Uri.parse('$baseUrl/rooms/$roomId/files');
     final request = http.StreamedRequest('POST', uri);
+    final basename = file.path
+        .split(RegExp(r'[\\/]'))
+        .last;
     request.headers.addAll({
       ..._headers,
-      'X-Filename': file.path.split('/').last,
+      'X-Filename': (filename != null && filename.isNotEmpty)
+          ? filename
+          : basename,
       'Content-Type': 'application/octet-stream',
       'Content-Length': size.toString(),
     });

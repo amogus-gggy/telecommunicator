@@ -72,7 +72,7 @@ class E2EE {
       final cached = await state.messageStore!.get(msg['id'] as int);
       if (cached != null) {
         _applyGroupPayload(msg, cached);
-        return cached;
+        return msg['body'] as String? ?? cached;
       }
     }
 
@@ -105,7 +105,7 @@ class E2EE {
         final plaintext = await MessageDecryptor.decryptOwnMessage(
             senderBlob, c.x25519Private, c.x25519Public);
         _persist(state, msg, plaintext);
-        return plaintext;
+        return msg['body'] as String? ?? plaintext;
       } catch (_) {
         return L10n.t('room.encrypted_sent');
       }
@@ -117,7 +117,7 @@ class E2EE {
       if (peekBlobVersion(blob) == 3) {
         final plaintext = await _decryptGroup(state, roomId, senderUsername, blob, signature, keys);
         _persist(state, msg, plaintext);
-        return plaintext;
+        return msg['body'] as String? ?? plaintext;
       } else if (peekBlobVersion(blob) >= 2) {
         final store = state.ratchetStore;
         if (store == null) {
@@ -134,7 +134,7 @@ class E2EE {
           store: store,
         );
         _persist(state, msg, plaintext);
-        return plaintext;
+        return msg['body'] as String? ?? plaintext;
       } else {
         final plaintext = await MessageDecryptor.decryptMessage(
           {'blob': blob, 'signature': signature},
@@ -143,7 +143,7 @@ class E2EE {
           keys.ed25519Pub,
         );
         _persist(state, msg, plaintext);
-        return plaintext;
+        return msg['body'] as String? ?? plaintext;
       }
     } on Exception catch (e) {
       msg['decryption_error'] = true;

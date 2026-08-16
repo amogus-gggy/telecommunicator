@@ -359,6 +359,7 @@ class _RoomViewState extends State<RoomView> {
           final meta2 = await client.uploadFile(
             _room.id,
             uploadPath,
+            filename: att.value,
             keyBlob: keyBlob,
             keySenderBlob: keySenderBlob,
             keySignature: keySignature,
@@ -368,7 +369,7 @@ class _RoomViewState extends State<RoomView> {
           // fall back to plaintext upload
           groupFileKeys.add(null);
           final meta2 =
-              await client.uploadFile(_room.id, att.key);
+              await client.uploadFile(_room.id, att.key, filename: att.value);
           uploadedFiles.add(meta2);
         } finally {
           if (tmp != null && await tmp.exists()) await tmp.delete();
@@ -418,7 +419,6 @@ class _RoomViewState extends State<RoomView> {
             _messages.indexWhere((m) => m['is_optimistic'] == true);
         if (idx >= 0) {
           _messages[idx]['files'] = uploadedFiles;
-          _messages[idx]['is_optimistic'] = false;
         }
         _attachments.clear();
       });
@@ -574,12 +574,9 @@ class _RoomViewState extends State<RoomView> {
     final isEncryptedError = m['decryption_error'] == true;
 
     final files = (m['files'] as List? ?? []);
-    final fileChips = files
-        .map<Widget>((f) => Chip(
-              avatar: const Icon(Icons.insert_drive_file, size: 18),
-              label: Text((f as Map)['filename']?.toString() ?? 'file'),
-              onDeleted: null,
-            ))
+    final fileCards = files
+        .map<Widget>((f) =>
+            _buildFileCard(Map<String, dynamic>.from(f as Map), m, isOwn: isOwn))
         .toList();
 
     return Align(
@@ -619,9 +616,9 @@ class _RoomViewState extends State<RoomView> {
                     isEncryptedError ? FontStyle.italic : FontStyle.normal,
               ),
             ),
-            if (fileChips.isNotEmpty) ...[
+            if (fileCards.isNotEmpty) ...[
               const SizedBox(height: 6),
-              ...fileChips,
+              ...fileCards,
             ],
             if (m['created_at'] != null)
               Padding(
@@ -640,6 +637,133 @@ class _RoomViewState extends State<RoomView> {
         ),
       ),
     );
+  }
+
+  Widget _buildFileCard(
+      Map<String, dynamic> fileMeta, Map<String, dynamic> msg,
+      {required bool isOwn}) {
+    final filename = (fileMeta['filename'] as String?) ?? 'file';
+    final cardColor = isOwn
+        ? context.onPrimary.withValues(alpha: 0.14)
+        : context.onSurface.withValues(alpha: 0.06);
+    final textColor = isOwn ? context.onPrimary : context.onSurface;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      margin: const EdgeInsets.only(top: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.attach_file,
+              size: 18, color: textColor.withValues(alpha: 0.8)),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              filename,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: textColor,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 4),
+          IconButton(
+            icon: Icon(Icons.download, size: 18, color: textColor),
+            visualDensity: VisualDensity.compact,
+            tooltip: L10n.t('room.download'),
+            onPressed: () => _downloadFile(fileMeta, msg),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Download + (if needed) decrypt a message file, then save it locally.
+  /// Mirrors the flet client's download flow and file-metadata standard.
+  Future<void> _downloadFile(
+      Map<String, dynamic> fileMeta, Map<String, dynamic> msg) async {
+    final fileId = fileMeta['id'];
+    if (fileId == null) {
+      if (!mounted) return;
+      showSnack(context, L10n.t('room.download_error'), ok: false);
+      return;
+    }
+    final filename = (fileMeta['filename'] as String?) ?? 'download';
+    final isEncrypted = fileMeta['is_encrypted'] == true;
+    final isGroupEncrypted = fileMeta['_group_file_key_b64'] != null;
+    final isOwn = _state.currentUser != null &&
+        fileMeta['uploader_id'] == _state.currentUser!.id;
+
+    try {
+      List<int>? senderEd25519Pub;
+      if (isEncrypted && !isOwn && !isGroupEncrypted) {
+        final uploader = (fileMeta['uploader_username'] as String?) ??
+            (msg['author_username'] as String?);
+        if (uploader != null) {
+          final keys = await E2EE.senderKeys(_state, uploader);
+          senderEd25519Pub = keys.ed25519Pub;
+        }
+      }
+
+      final savePath = await FilePicker.platform.saveFile(
+        dialogTitle: L10n.t('room.download'),
+        fileName: filename,
+        type: FileType.any,
+      );
+      if (savePath == null) return;
+      final outFile = File(savePath);
+      final client = ApiClient(state: _state);
+
+      if (isGroupEncrypted || isEncrypted) {
+        final tmp = await _tempFile('download.enc');
+        try {
+          await client.downloadFile(_room.id, fileId as int, tmp);
+          if (isGroupEncrypted) {
+            await FileDecryptor.decryptFileWithKeyStreaming(
+              src: tmp,
+              dst: outFile,
+              fileKey:
+                  base64Decode(fileMeta['_group_file_key_b64'] as String),
+            );
+          } else if (isOwn && fileMeta['key_sender_blob'] != null) {
+            await FileDecryptor.decryptOwnFileStreaming(
+              src: tmp,
+              dst: outFile,
+              keySenderBlobB64: fileMeta['key_sender_blob'] as String,
+              x25519Priv: _state.crypto!.x25519Private,
+            );
+          } else if (senderEd25519Pub != null &&
+              fileMeta['key_blob'] != null &&
+              fileMeta['key_signature'] != null) {
+            await FileDecryptor.decryptFileStreaming(
+              src: tmp,
+              dst: outFile,
+              keyBlobB64: fileMeta['key_blob'] as String,
+              signatureB64: fileMeta['key_signature'] as String,
+              x25519Priv: _state.crypto!.x25519Private,
+              senderEd25519Pub: senderEd25519Pub,
+            );
+          } else {
+            throw Exception('Missing decryption keys');
+          }
+        } finally {
+          if (await tmp.exists()) await tmp.delete();
+        }
+      } else {
+        await client.downloadFile(_room.id, fileId as int, outFile);
+      }
+
+      if (!mounted) return;
+      showSnack(context, L10n.t('room.downloaded', {'name': filename}));
+    } catch (e) {
+      if (!mounted) return;
+      showSnack(context, e.toString(), ok: false);
+    }
   }
 
   String _formatTime(String iso) {
