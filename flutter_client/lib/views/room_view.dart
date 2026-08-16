@@ -102,14 +102,26 @@ class _RoomViewState extends State<RoomView> {
     final client = ApiClient(state: _state);
     try {
       final data = await client.getMessages(_room.id);
+      print('[DEBUG][loadHistory] raw response for room ${_room.id}: $data');
       if (!mounted) return;
       final items = data.whereType<Map<String, dynamic>>().toList();
+      print('[DEBUG][loadHistory] parsed items count: ${items.length}');
+      for (final raw in items) {
+        print('[DEBUG][loadHistory] raw item files: ${raw['files']} '
+            'is_encrypted=${raw['is_encrypted']} id=${raw['id']}');
+      }
       setState(() => _loading = false);
       for (final m in items.reversed) {
-        await _decryptInto(m);
+        try {
+          await _decryptInto(m);
+        } catch (e) {
+          print('[DEBUG][loadHistory] failed to decrypt message '
+              '${m['id']}: $e');
+        }
       }
       _scrollToBottom(animate: false);
     } catch (e) {
+      print('[DEBUG][loadHistory] error: $e');
       if (!mounted) return;
       setState(() => _loading = false);
       showSnack(context, e.toString(), ok: false);
@@ -117,11 +129,33 @@ class _RoomViewState extends State<RoomView> {
   }
 
   Future<void> _decryptInto(Map<String, dynamic> msg) async {
-    final body = await E2EE.decryptIncoming(_state, msg, _room.id);
+    // Deep-copy into a fully mutable structure — jsonDecode yields unmodifiable
+    // nested maps/lists and parts of the decrypt path (and downstream readers)
+    // expect to mutate them.
+    final m = _deepCopy(msg) as Map<String, dynamic>;
+    print('[DEBUG][decryptInto] input msg: $m');
+    final body = await E2EE.decryptIncoming(_state, m, _room.id);
+    print('[DEBUG][decryptInto] decrypted body: $body');
+    print('[DEBUG][decryptInto] parsed files after decrypt: ${m['files']}');
     if (!mounted) return;
     setState(() {
-      _messages.add({...msg, 'body': body});
+      _messages.add({...m, 'body': body});
     });
+  }
+
+  /// Recursively copies JSON-like structures into mutable Dart collections.
+  static dynamic _deepCopy(dynamic v) {
+    if (v is Map) {
+      final out = <String, dynamic>{};
+      v.forEach((k, val) {
+        out[k is String ? k : k.toString()] = _deepCopy(val);
+      });
+      return out;
+    }
+    if (v is List) {
+      return [for (final x in v) _deepCopy(x)];
+    }
+    return v;
   }
 
   void _startWs() {
@@ -185,10 +219,13 @@ class _RoomViewState extends State<RoomView> {
   }
 
   Future<void> _onRoomMessage(Map<String, dynamic> payload) async {
+    print('[DEBUG][onRoomMessage] RAW payload: $payload');
     if (payload['type'] == 'encrypted_message') {
       final raw = payload['payload'] is Map
           ? payload['payload'] as Map<String, dynamic>
           : payload;
+      print('[DEBUG][onRoomMessage][encrypted] raw inner payload: $raw');
+      print('[DEBUG][onRoomMessage][encrypted] raw files: ${raw['files']}');
       final msg = <String, dynamic>{
         'id': raw['message_id'] ?? raw['id'],
         'room_id': raw['room_id'],
@@ -202,11 +239,13 @@ class _RoomViewState extends State<RoomView> {
         'sender_encrypted_blob': raw['sender_encrypted_blob'],
         'signature': raw['signature'],
       };
+      print('[DEBUG][onRoomMessage][encrypted] parsed msg: $msg');
       if (msg['room_id'] != _room.id) return;
       // If it's our own optimistic message, replace rather than append.
       final isOwn = _state.currentUser != null &&
           msg['author_username'] == _state.currentUser!.username;
       await _decryptInto(msg);
+      print('[DEBUG][onRoomMessage][encrypted] after decrypt files: ${msg['files']}');
       if (!mounted) return;
       if (isOwn) {
         // Remove duplicate optimistic entry if any
@@ -217,12 +256,28 @@ class _RoomViewState extends State<RoomView> {
       }
       _scrollToBottom();
     } else if (payload['type'] == 'message') {
-      final msg = Map<String, dynamic>.from(payload);
+      final raw = payload['payload'] is Map
+          ? payload['payload'] as Map<String, dynamic>
+          : payload;
+      print('[DEBUG][onRoomMessage][message] raw inner payload: $raw');
+      print('[DEBUG][onRoomMessage][message] raw files: ${raw['files']}');
+      final msg = Map<String, dynamic>.from(raw);
+      print('[DEBUG][onRoomMessage][message] parsed msg: $msg');
       if (msg['room_id'] != _room.id) return;
       final body = msg['body'] as String? ?? '';
       if (!mounted) return;
+      // Drop the optimistic placeholder we added on send (avoids duplicates
+      // and shows the real file attachments from the server).
+      final ownIdx = _messages.indexWhere((m) =>
+          m['is_optimistic'] == true && m['body'] == body);
+      if (ownIdx >= 0) {
+        setState(() => _messages.removeAt(ownIdx));
+      }
       setState(() => _messages.add({...msg, 'body': body, 'decrypted': true}));
+      print('[DEBUG][onRoomMessage][message] added msg with files: ${msg['files']}');
       _scrollToBottom();
+    } else {
+      print('[DEBUG][onRoomMessage] unhandled type: ${payload['type']}');
     }
   }
 
@@ -330,13 +385,16 @@ class _RoomViewState extends State<RoomView> {
         String? keySignature;
         var groupKey = null as Uint8List?;
 
-        try {
-          if (isGroup && hasE2ee) {
-            tmp = await _tempFile('group.enc');
-            groupKey =
-                await FileEncryptor.encryptFileGroupStreaming(src: att.key, dst: tmp);
-            uploadPath = tmp;
-          } else if (e2eeRecipientUsername != null && hasE2ee) {
+          try {
+            if (isGroup && hasE2ee) {
+              tmp = await _tempFile('group.enc');
+              groupKey =
+                  await FileEncryptor.encryptFileGroupStreaming(src: att.key, dst: tmp);
+              uploadPath = tmp;
+              // Carry the raw symmetric key as key_blob so the client can
+              // decrypt the file directly without parsing the message blob.
+              keyBlob = base64Encode(groupKey);
+            } else if (e2eeRecipientUsername != null && hasE2ee) {
             tmp = await _tempFile('personal.enc');
             final keys = await E2EE.senderKeys(_state, e2eeRecipientUsername);
             final meta = await FileEncryptor.encryptFileStreaming(
@@ -574,6 +632,8 @@ class _RoomViewState extends State<RoomView> {
     final isEncryptedError = m['decryption_error'] == true;
 
     final files = (m['files'] as List? ?? []);
+    print('[DEBUG][buildMessage] id=${m['id']} body="$body" '
+        'filesCount=${files.length} files=$files');
     final fileCards = files
         .map<Widget>((f) =>
             _buildFileCard(Map<String, dynamic>.from(f as Map), m, isOwn: isOwn))
@@ -684,7 +744,12 @@ class _RoomViewState extends State<RoomView> {
   }
 
   /// Download + (if needed) decrypt a message file, then save it locally.
-  /// Mirrors the flet client's download flow and file-metadata standard.
+  ///
+  /// Decryption-key handling (compatibility with the old client is not required):
+  ///  * group/public room  -> `key_blob` carries the raw symmetric file key
+  ///  * personal 1:1        -> recipient key blob (`key_blob`/`key_signature`)
+  ///                           or the sender blob (`key_sender_blob`) for own files
+  ///  * unencrypted         -> downloaded as-is
   Future<void> _downloadFile(
       Map<String, dynamic> fileMeta, Map<String, dynamic> msg) async {
     final fileId = fileMeta['id'];
@@ -695,21 +760,9 @@ class _RoomViewState extends State<RoomView> {
     }
     final filename = (fileMeta['filename'] as String?) ?? 'download';
     final isEncrypted = fileMeta['is_encrypted'] == true;
-    final isGroupEncrypted = fileMeta['_group_file_key_b64'] != null;
-    final isOwn = _state.currentUser != null &&
-        fileMeta['uploader_id'] == _state.currentUser!.id;
+    final isGroup = _room.roomType != 'personal';
 
     try {
-      List<int>? senderEd25519Pub;
-      if (isEncrypted && !isOwn && !isGroupEncrypted) {
-        final uploader = (fileMeta['uploader_username'] as String?) ??
-            (msg['author_username'] as String?);
-        if (uploader != null) {
-          final keys = await E2EE.senderKeys(_state, uploader);
-          senderEd25519Pub = keys.ed25519Pub;
-        }
-      }
-
       final savePath = await FilePicker.platform.saveFile(
         dialogTitle: L10n.t('room.download'),
         fileName: filename,
@@ -719,43 +772,59 @@ class _RoomViewState extends State<RoomView> {
       final outFile = File(savePath);
       final client = ApiClient(state: _state);
 
-      if (isGroupEncrypted || isEncrypted) {
-        final tmp = await _tempFile('download.enc');
-        try {
-          await client.downloadFile(_room.id, fileId as int, tmp);
-          if (isGroupEncrypted) {
-            await FileDecryptor.decryptFileWithKeyStreaming(
-              src: tmp,
-              dst: outFile,
-              fileKey:
-                  base64Decode(fileMeta['_group_file_key_b64'] as String),
-            );
-          } else if (isOwn && fileMeta['key_sender_blob'] != null) {
-            await FileDecryptor.decryptOwnFileStreaming(
-              src: tmp,
-              dst: outFile,
-              keySenderBlobB64: fileMeta['key_sender_blob'] as String,
-              x25519Priv: _state.crypto!.x25519Private,
-            );
-          } else if (senderEd25519Pub != null &&
-              fileMeta['key_blob'] != null &&
-              fileMeta['key_signature'] != null) {
-            await FileDecryptor.decryptFileStreaming(
-              src: tmp,
-              dst: outFile,
-              keyBlobB64: fileMeta['key_blob'] as String,
-              signatureB64: fileMeta['key_signature'] as String,
-              x25519Priv: _state.crypto!.x25519Private,
-              senderEd25519Pub: senderEd25519Pub,
-            );
-          } else {
-            throw Exception('Missing decryption keys');
-          }
-        } finally {
-          if (await tmp.exists()) await tmp.delete();
-        }
-      } else {
+      if (!isEncrypted) {
         await client.downloadFile(_room.id, fileId as int, outFile);
+        if (!mounted) return;
+        showSnack(context, L10n.t('room.downloaded', {'name': filename}));
+        return;
+      }
+
+      List<int>? senderEd25519Pub;
+      if (!isGroup) {
+        final uploader = (fileMeta['uploader_username'] as String?) ??
+            (msg['author_username'] as String?);
+        if (uploader != null) {
+          final keys = await E2EE.senderKeys(_state, uploader);
+          senderEd25519Pub = keys.ed25519Pub;
+        }
+      }
+
+      final tmp = await _tempFile('download.enc');
+      try {
+        await client.downloadFile(_room.id, fileId as int, tmp);
+        if (isGroup) {
+          if (fileMeta['key_blob'] == null) {
+            throw Exception('Missing group file key');
+          }
+          await FileDecryptor.decryptFileWithKeyStreaming(
+            src: tmp,
+            dst: outFile,
+            fileKey: base64Decode(fileMeta['key_blob'] as String),
+          );
+        } else if (fileMeta['uploader_id'] == _state.currentUser?.id &&
+            fileMeta['key_sender_blob'] != null) {
+          await FileDecryptor.decryptOwnFileStreaming(
+            src: tmp,
+            dst: outFile,
+            keySenderBlobB64: fileMeta['key_sender_blob'] as String,
+            x25519Priv: _state.crypto!.x25519Private,
+          );
+        } else if (senderEd25519Pub != null &&
+            fileMeta['key_blob'] != null &&
+            fileMeta['key_signature'] != null) {
+          await FileDecryptor.decryptFileStreaming(
+            src: tmp,
+            dst: outFile,
+            keyBlobB64: fileMeta['key_blob'] as String,
+            signatureB64: fileMeta['key_signature'] as String,
+            x25519Priv: _state.crypto!.x25519Private,
+            senderEd25519Pub: senderEd25519Pub,
+          );
+        } else {
+          throw Exception('Missing decryption keys');
+        }
+      } finally {
+        if (await tmp.exists()) await tmp.delete();
       }
 
       if (!mounted) return;

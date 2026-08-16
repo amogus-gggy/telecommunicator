@@ -145,7 +145,7 @@ class E2EE {
         _persist(state, msg, plaintext);
         return msg['body'] as String? ?? plaintext;
       }
-    } on Exception catch (e) {
+    } catch (e) {
       msg['decryption_error'] = true;
       final s = e.toString();
       if (s.contains('signature')) return L10n.t('room.encrypted_bad_signature');
@@ -274,28 +274,16 @@ class E2EE {
   }
 
   static void _applyGroupPayload(Map<String, dynamic> msg, String plaintext) {
+    // The file metadata (filename, id, is_encrypted and the decryption key in
+    // `key_blob`) is delivered by the server inside `msg['files']`, so we only
+    // need to recover the visible body from the (possibly group) payload.
     try {
       final payload = jsonDecode(plaintext) as Map<String, dynamic>;
-      if (payload['t'] != 'group-payload') {
+      if (payload['t'] == 'group-payload') {
+        msg['body'] = payload['body'] as String? ?? '';
+      } else {
         msg['body'] = plaintext;
-        return;
       }
-      msg['body'] = payload['body'] as String? ?? '';
-      final filesMap = (payload['files'] as Map? ?? {});
-      final files = msg['files'] as List? ?? [];
-      final byId = <String, Map<String, dynamic>>{};
-      for (final f in files) {
-        final fm = (f as Map).cast<String, dynamic>();
-        final id = fm['id'];
-        if (id != null) byId[id.toString()] = fm;
-      }
-      filesMap.forEach((id, keyB64) {
-        final entry = byId[id.toString()] ??
-            <String, dynamic>{'id': int.tryParse(id.toString()) ?? id};
-        entry['_group_file_key_b64'] = keyB64.toString();
-        byId[id.toString()] = entry;
-      });
-      msg['files'] = byId.values.toList();
     } catch (_) {
       msg['body'] = plaintext;
     }

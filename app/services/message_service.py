@@ -51,6 +51,7 @@ def _relay_payload(
     is_encrypted: bool = False,
     created_at: datetime | None = None,
     event_id: str | None = None,
+    files: list[dict] | None = None,
 ) -> dict:
     return {
         "event_id": event_id or _new_event_id(),
@@ -59,7 +60,8 @@ def _relay_payload(
         "encrypted_blob": base64.b64encode(encrypted_blob).decode()
         if encrypted_blob
         else None,
-        "sender_encrypted_blob": base64.b64encode(sender_encrypted_blob).decode()
+        "sender_encrypted_blob": base64.b64encode(
+            sender_encrypted_blob).decode()
         if sender_encrypted_blob
         else None,
         "signature": base64.b64encode(signature).decode() if signature else None,
@@ -69,6 +71,9 @@ def _relay_payload(
             else None
         ),
         "created_at": (created_at or datetime.now(timezone.utc)).isoformat(),
+        # Federated file transfer: the receiving server stores only metadata and
+        # proxies the encrypted bytes back to the origin homeserver on download.
+        "files": files or [],
     }
 
 
@@ -87,6 +92,13 @@ def _author_handle(user: User | None) -> str:
     if user.server_name and user.server_name != SERVER_NAME:
         return f"{user.username}@{user.server_name}"
     return user.username
+
+
+def _server_from_handle(handle: str | None) -> str | None:
+    """Return the ``@server`` part of a ``username@server`` handle, if any."""
+    if not handle or "@" not in handle:
+        return None
+    return handle.rsplit("@", 1)[1] or None
 
 
 async def _persist_payload_message(
@@ -152,6 +164,41 @@ async def _persist_payload_message(
     db.add(msg)
     await db.commit()
     await db.refresh(msg)
+
+    # Federated file transfer: the encrypted bytes live on the origin homeserver,
+    # so the receiving server only stores metadata + a pointer for download proxy.
+    for fmeta in payload.get("files") or []:
+        origin_server_name = fmeta.get("origin_server_name") or _server_from_handle(
+            fmeta.get("uploader_username")
+        )
+        origin_file_id = fmeta.get("id")
+        if not origin_server_name or origin_file_id is None:
+            continue
+        existing = await db.execute(
+            select(File).where(
+                File.message_id == msg.id,
+                File.origin_server_name == origin_server_name,
+                File.origin_file_id == origin_file_id,
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            continue
+        db.add(
+            File(
+                filename=fmeta.get("filename"),
+                path="",
+                uploader_id=author.id,
+                room_id=room.id,
+                is_encrypted=bool(fmeta.get("is_encrypted")),
+                key_blob=fmeta.get("key_blob"),
+                key_sender_blob=fmeta.get("key_sender_blob"),
+                key_signature=fmeta.get("key_signature"),
+                message_id=msg.id,
+                origin_server_name=origin_server_name,
+                origin_file_id=origin_file_id,
+            )
+        )
+    await db.commit()
     return msg
 
 
@@ -442,13 +489,31 @@ async def send_message(
 
     # Federated delivery: fan out to remote mirrors / forward to the host.
     try:
+        relay_files = [
+            {
+                "id": f.id,
+                "filename": f.filename,
+                "is_encrypted": f.is_encrypted,
+                "key_blob": f.key_blob,
+                "key_sender_blob": f.key_sender_blob,
+                "key_signature": f.key_signature,
+                "uploader_username": author.username,
+                "origin_server_name": SERVER_NAME,
+            }
+            for f in (message_with_files.files or [])
+        ]
         await _relay_message(
             db,
             room,
             author,
-            _relay_payload(author=author, body=body, event_id=msg.event_id),
+            _relay_payload(
+                author=author,
+                body=body,
+                event_id=msg.event_id,
+                files=relay_files,
+            ),
         )
-    except HTTPException:
+    except Exception:
         pass  # Single-server operation must not fail because of a remote.
 
     return response
@@ -623,6 +688,7 @@ async def send_encrypted_message(
             "key_blob": f.key_blob,
             "key_sender_blob": f.key_sender_blob,
             "key_signature": f.key_signature,
+            "origin_server_name": SERVER_NAME,
         }
         for f in (msg_loaded.files or [])
     ]
@@ -676,6 +742,7 @@ async def send_encrypted_message(
                 recipient=recipient,
                 is_encrypted=True,
                 event_id=msg.event_id,
+                files=files_payload,
             ),
         )
     except Exception:
