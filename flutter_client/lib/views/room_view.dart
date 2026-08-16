@@ -459,9 +459,9 @@ class _RoomViewState extends State<RoomView> {
     final isPersonal = _room.roomType == 'personal';
 
     return Scaffold(
-      backgroundColor: AppColors.surfaceContainer,
+      backgroundColor: context.surfaceContainer,
       appBar: AppBar(
-        backgroundColor: AppColors.surface,
+        backgroundColor: context.surface,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -472,8 +472,7 @@ class _RoomViewState extends State<RoomView> {
               _reconnecting
                   ? L10n.t('room.reconnecting')
                   : _getSubtitle(),
-              style:
-                  const TextStyle(fontSize: 12, color: AppColors.onSurfaceVariant),
+              style: TextStyle(fontSize: 12, color: context.onSurfaceVariant),
             ),
           ],
         ),
@@ -591,7 +590,7 @@ class _RoomViewState extends State<RoomView> {
         margin: const EdgeInsets.symmetric(vertical: 3),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(
-          color: isOwn ? AppColors.primary : AppColors.surface,
+          color: isOwn ? context.primary : context.surface,
           borderRadius: BorderRadius.circular(16),
         ),
         child: Column(
@@ -608,14 +607,14 @@ class _RoomViewState extends State<RoomView> {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: isOwn ? Colors.white : AppColors.primary,
+                    color: isOwn ? context.onPrimary : context.primary,
                   ),
                 ),
               ),
             Text(
               body,
               style: TextStyle(
-                color: isOwn ? Colors.white : AppColors.onSurface,
+                color: isOwn ? context.onPrimary : context.onSurface,
                 fontStyle:
                     isEncryptedError ? FontStyle.italic : FontStyle.normal,
               ),
@@ -632,8 +631,8 @@ class _RoomViewState extends State<RoomView> {
                   style: TextStyle(
                     fontSize: 10,
                     color: isOwn
-                        ? Colors.white70
-                        : AppColors.onSurfaceVariant,
+                        ? context.onPrimary.withValues(alpha: 0.7)
+                        : context.onSurfaceVariant,
                   ),
                 ),
               ),
@@ -680,8 +679,8 @@ class _RoomViewState extends State<RoomView> {
               ),
               if (_inviteError != null)
                 Text(_inviteError!,
-                    style: const TextStyle(
-                        color: AppColors.error, fontSize: 12)),
+                    style: TextStyle(
+                        color: context.error, fontSize: 12)),
             ],
           ),
           actions: [

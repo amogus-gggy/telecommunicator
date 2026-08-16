@@ -55,7 +55,7 @@ class _RoomSettingsViewState extends State<RoomSettingsView> {
           padding: const EdgeInsets.all(24),
           child: Text(
             L10n.t('room_settings.personal_auto'),
-            style: const TextStyle(color: AppColors.onSurfaceVariant),
+            style: TextStyle(color: context.onSurfaceVariant),
             textAlign: TextAlign.center,
           ),
         ),
@@ -66,7 +66,7 @@ class _RoomSettingsViewState extends State<RoomSettingsView> {
           padding: const EdgeInsets.all(24),
           child: Text(
             L10n.t('room_settings.only_owner_access'),
-            style: const TextStyle(color: AppColors.onSurfaceVariant),
+            style: TextStyle(color: context.onSurfaceVariant),
             textAlign: TextAlign.center,
           ),
         ),
@@ -76,10 +76,10 @@ class _RoomSettingsViewState extends State<RoomSettingsView> {
         padding: const EdgeInsets.all(16),
         children: [
           Text(L10n.t('room_settings.permissions'),
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.onSurfaceVariant)),
+                  color: context.onSurfaceVariant)),
           const SizedBox(height: 8),
           Card(
             child: SwitchListTile(

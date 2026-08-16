@@ -220,17 +220,17 @@ class _ChatListViewState extends State<ChatListView>
             Stack(
               clipBehavior: Clip.none,
               children: [
-                initialsAvatar(name, size: 44),
+                initialsAvatar(context, name, size: 44),
                 Positioned(
                   right: 0,
                   bottom: 0,
                   child: Container(
                     padding: const EdgeInsets.all(2),
                     decoration: BoxDecoration(
-                      color: AppColors.primary,
+                      color: context.primary,
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Icon(icon, size: 12, color: Colors.white),
+                    child: Icon(icon, size: 12, color: context.onPrimary),
                   ),
                 ),
               ],
@@ -244,13 +244,13 @@ class _ChatListViewState extends State<ChatListView>
                       style: const TextStyle(
                           fontSize: 15, fontWeight: FontWeight.w600)),
                   Text(subtitle,
-                      style: const TextStyle(
-                          fontSize: 12.5, color: AppColors.onSurfaceVariant)),
+                      style: TextStyle(
+                          fontSize: 12.5, color: context.onSurfaceVariant)),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right,
-                size: 20, color: AppColors.onSurfaceVariant),
+            Icon(Icons.chevron_right,
+                size: 20, color: context.onSurfaceVariant),
           ],
         ),
       ),
@@ -269,7 +269,7 @@ class _ChatListViewState extends State<ChatListView>
       return Center(
         child: Text(
           L10n.t(emptyKey),
-          style: const TextStyle(color: AppColors.onSurfaceVariant),
+          style: TextStyle(color: context.onSurfaceVariant),
         ),
       );
     }
@@ -298,17 +298,17 @@ class _ChatListViewState extends State<ChatListView>
             : null;
 
     return Scaffold(
-      backgroundColor: AppColors.surfaceContainer,
+      backgroundColor: context.surfaceContainer,
       appBar: AppBar(
-        backgroundColor: AppColors.surface,
+        backgroundColor: context.surface,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('Chats',
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
             Text(_loggedAs(),
-                style: const TextStyle(
-                    fontSize: 12, color: AppColors.onSurfaceVariant)),
+                style: TextStyle(
+                    fontSize: 12, color: context.onSurfaceVariant)),
           ],
         ),
         actions: [
@@ -359,7 +359,7 @@ class _ChatListViewState extends State<ChatListView>
         ],
       ),
       bottomNavigationBar: Material(
-        color: AppColors.surface,
+        color: context.surface,
         child: SafeArea(
           child: TabBar(
             controller: _tabController,
@@ -400,8 +400,8 @@ class _ChatListViewState extends State<ChatListView>
                           ),
                           if (_personalError != null)
                             Text(_personalError!,
-                                style: const TextStyle(
-                                    color: AppColors.error, fontSize: 12)),
+                                style: TextStyle(
+                                    color: context.error, fontSize: 12)),
                         ],
                       ),
                       actions: [
@@ -441,8 +441,8 @@ class _ChatListViewState extends State<ChatListView>
                             ),
                             if (_groupError != null)
                               Text(_groupError!,
-                                  style: const TextStyle(
-                                      color: AppColors.error, fontSize: 12)),
+                                  style: TextStyle(
+                                      color: context.error, fontSize: 12)),
                           ],
                         ),
                         actions: [

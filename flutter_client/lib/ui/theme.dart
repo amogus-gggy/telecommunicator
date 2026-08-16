@@ -23,6 +23,23 @@ class AppColors {
   static const Color darkOnSurfaceVariant = Color(0xFFCAC4D0);
 }
 
+/// Theme-aware color accessors resolving against the current [ColorScheme].
+/// Use these instead of the static [AppColors] constants (which are light-only)
+/// so every surface adapts to the active light/dark/system theme.
+extension ThemeColors on BuildContext {
+  Color get primary => Theme.of(this).colorScheme.primary;
+  Color get onPrimary => Theme.of(this).colorScheme.onPrimary;
+  Color get onError => Theme.of(this).colorScheme.onError;
+  Color get surfaceContainer => Theme.of(this).colorScheme.surfaceContainer;
+  Color get surfaceContainerHigh =>
+      Theme.of(this).colorScheme.surfaceContainerHigh;
+  Color get surface => Theme.of(this).colorScheme.surface;
+  Color get outlineVariant => Theme.of(this).colorScheme.outlineVariant;
+  Color get onSurface => Theme.of(this).colorScheme.onSurface;
+  Color get onSurfaceVariant => Theme.of(this).colorScheme.onSurfaceVariant;
+  Color get error => Theme.of(this).colorScheme.error;
+}
+
 ThemeData lightTheme() => ThemeData(
       useMaterial3: true,
       brightness: Brightness.light,
@@ -46,7 +63,8 @@ ThemeData darkTheme() => ThemeData(
     );
 
 /// Round avatar with the first letters of the display name.
-Widget initialsAvatar(String name, {double size = 44}) {
+Widget initialsAvatar(BuildContext context, String name, {double size = 44}) {
+  final primary = Theme.of(context).colorScheme.primary;
   final parts = name
       .trim()
       .split(RegExp(r'\s+'))
@@ -64,34 +82,37 @@ Widget initialsAvatar(String name, {double size = 44}) {
   }
   return CircleAvatar(
     radius: size / 2,
-    backgroundColor: AppColors.primary.withValues(alpha: 0.15),
+    backgroundColor: primary.withValues(alpha: 0.15),
     child: Text(
       initials,
       style: TextStyle(
         fontSize: size * 0.36,
         fontWeight: FontWeight.w600,
-        color: AppColors.primary,
+        color: primary,
       ),
     ),
   );
 }
 
 FilledButton primaryButton(
+  BuildContext context,
   String label, {
   VoidCallback? onPressed,
   IconData? icon,
-}) =>
-    FilledButton.icon(
-      onPressed: onPressed,
-      icon: icon == null ? const SizedBox.shrink() : Icon(icon, size: 18),
-      label: Text(label),
-      style: FilledButton.styleFrom(
-        backgroundColor: AppColors.primary,
-        foregroundColor: AppColors.onPrimary,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-      ),
-    );
+}) {
+  final scheme = Theme.of(context).colorScheme;
+  return FilledButton.icon(
+    onPressed: onPressed,
+    icon: icon == null ? const SizedBox.shrink() : Icon(icon, size: 18),
+    label: Text(label),
+    style: FilledButton.styleFrom(
+      backgroundColor: scheme.primary,
+      foregroundColor: scheme.onPrimary,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+    ),
+  );
+}
 
 InputDecoration themedFieldDecoration({
   String? label,
@@ -107,11 +128,12 @@ InputDecoration themedFieldDecoration({
     );
 
 void showSnack(BuildContext context, String message, {bool ok = true}) {
+  final scheme = Theme.of(context).colorScheme;
   final messenger = ScaffoldMessenger.of(context);
   messenger.hideCurrentSnackBar();
   messenger.showSnackBar(SnackBar(
     content: Text(message),
-    backgroundColor: ok ? AppColors.primary : AppColors.error,
+    backgroundColor: ok ? scheme.primary : scheme.error,
   ));
 }
 

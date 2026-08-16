@@ -161,7 +161,7 @@ class _RegisterViewState extends State<RegisterView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.surfaceContainer,
+      backgroundColor: context.surfaceContainer,
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(32),
@@ -169,9 +169,9 @@ class _RegisterViewState extends State<RegisterView> {
             width: 360,
             padding: const EdgeInsets.all(32),
             decoration: BoxDecoration(
-              color: AppColors.surface,
+              color: context.surface,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.outlineVariant),
+              border: Border.all(color: context.outlineVariant),
               boxShadow: const [
                 BoxShadow(
                   blurRadius: 24,
@@ -184,13 +184,13 @@ class _RegisterViewState extends State<RegisterView> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                initialsAvatar('Telecommunicator', size: 64),
+                initialsAvatar(context, 'Telecommunicator', size: 64),
                 const SizedBox(height: 10),
                 const Text('Telecommunicator',
                     style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
                 Text(
                   L10n.t('register.subtitle'),
-                  style: const TextStyle(fontSize: 14, color: AppColors.onSurfaceVariant),
+                  style: TextStyle(fontSize: 14, color: context.onSurfaceVariant),
                 ),
                 const SizedBox(height: 16),
                 TextField(
@@ -203,7 +203,7 @@ class _RegisterViewState extends State<RegisterView> {
                 ),
                 if (_usernameError != null)
                   Text(_usernameError!,
-                      style: const TextStyle(fontSize: 12, color: AppColors.error)),
+                      style: TextStyle(fontSize: 12, color: context.error)),
                 const SizedBox(height: 8),
                 TextField(
                   controller: _emailCtrl,
@@ -211,7 +211,7 @@ class _RegisterViewState extends State<RegisterView> {
                 ),
                 if (_emailError != null)
                   Text(_emailError!,
-                      style: const TextStyle(fontSize: 12, color: AppColors.error)),
+                      style: TextStyle(fontSize: 12, color: context.error)),
                 const SizedBox(height: 8),
                 TextField(
                   controller: _passwordCtrl,
@@ -222,18 +222,19 @@ class _RegisterViewState extends State<RegisterView> {
                 ),
                 if (_passwordError != null)
                   Text(_passwordError!,
-                      style: const TextStyle(fontSize: 12, color: AppColors.error)),
+                      style: TextStyle(fontSize: 12, color: context.error)),
                 if (_generalError != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: Text(_generalError!,
-                        style: const TextStyle(color: AppColors.error)),
+                        style: TextStyle(color: context.error)),
                   ),
                 const SizedBox(height: 12),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     primaryButton(
+                      context,
                       L10n.t('register.submit'),
                       onPressed: _busy ? null : _doRegister,
                     ),
@@ -255,7 +256,7 @@ class _RegisterViewState extends State<RegisterView> {
                     );
                   },
                   child: Text(L10n.t('register.have_account'),
-                      style: const TextStyle(color: AppColors.primary)),
+                      style: TextStyle(color: context.primary)),
                 ),
               ],
             ),

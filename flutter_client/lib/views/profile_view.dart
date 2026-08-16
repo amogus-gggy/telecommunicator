@@ -165,6 +165,7 @@ class _ProfileViewState extends State<ProfileView> {
             child: Column(
               children: [
                 initialsAvatar(
+                  context,
                   user.displayName ?? user.username,
                   size: 64,
                 ),
@@ -175,16 +176,16 @@ class _ProfileViewState extends State<ProfileView> {
                       fontSize: 20, fontWeight: FontWeight.bold),
                 ),
                 Text(handle,
-                    style: const TextStyle(color: AppColors.onSurfaceVariant)),
+                    style: TextStyle(color: context.onSurfaceVariant)),
               ],
             ),
           ),
           const SizedBox(height: 24),
           Text(L10n.t('profile.account_info'),
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.onSurfaceVariant)),
+                  color: context.onSurfaceVariant)),
           const SizedBox(height: 8),
           Card(
             child: ListTile(
@@ -204,10 +205,10 @@ class _ProfileViewState extends State<ProfileView> {
           ),
           const SizedBox(height: 16),
           Text(L10n.t('profile.update_display_name'),
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.onSurfaceVariant)),
+                  color: context.onSurfaceVariant)),
           const SizedBox(height: 8),
           Card(
             child: Padding(
@@ -232,10 +233,10 @@ class _ProfileViewState extends State<ProfileView> {
           ),
           const SizedBox(height: 16),
           Text(L10n.t('profile.change_password'),
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.onSurfaceVariant)),
+                  color: context.onSurfaceVariant)),
           const SizedBox(height: 8),
           Card(
             child: Padding(
@@ -269,10 +270,10 @@ class _ProfileViewState extends State<ProfileView> {
           ),
           const SizedBox(height: 16),
           Text(L10n.t('profile.message_alignment'),
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.onSurfaceVariant)),
+                  color: context.onSurfaceVariant)),
           const SizedBox(height: 8),
           Card(
             child: Column(
@@ -300,10 +301,10 @@ class _ProfileViewState extends State<ProfileView> {
           ),
           const SizedBox(height: 16),
           Text(L10n.t('theme.title'),
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.onSurfaceVariant)),
+                  color: context.onSurfaceVariant)),
           const SizedBox(height: 8),
           Card(
             child: Column(
@@ -333,8 +334,8 @@ class _ProfileViewState extends State<ProfileView> {
           FilledButton.tonal(
             onPressed: _logout,
             style: FilledButton.styleFrom(
-              backgroundColor: AppColors.error,
-              foregroundColor: Colors.white,
+              backgroundColor: context.error,
+              foregroundColor: context.onError,
             ),
             child: Text(L10n.t('chat_list.logout')),
           ),

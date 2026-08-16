@@ -136,7 +136,7 @@ class _LoginViewState extends State<LoginView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.surfaceContainer,
+      backgroundColor: context.surfaceContainer,
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(32),
@@ -144,9 +144,9 @@ class _LoginViewState extends State<LoginView> {
             width: 360,
             padding: const EdgeInsets.all(32),
             decoration: BoxDecoration(
-              color: AppColors.surface,
+              color: context.surface,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.outlineVariant),
+              border: Border.all(color: context.outlineVariant),
               boxShadow: const [
                 BoxShadow(
                   blurRadius: 24,
@@ -159,13 +159,13 @@ class _LoginViewState extends State<LoginView> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                initialsAvatar('Telecommunicator', size: 72),
+                initialsAvatar(context, 'Telecommunicator', size: 72),
                 const SizedBox(height: 12),
                 const Text('Telecommunicator',
                     style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
                 Text(
                   L10n.t('login.subtitle'),
-                  style: const TextStyle(fontSize: 14, color: AppColors.onSurfaceVariant),
+                  style: TextStyle(fontSize: 14, color: context.onSurfaceVariant),
                 ),
                 const SizedBox(height: 20),
                 TextField(
@@ -188,7 +188,7 @@ class _LoginViewState extends State<LoginView> {
                     padding: const EdgeInsets.only(top: 8),
                     child: Text(
                       _error!,
-                      style: const TextStyle(fontSize: 13, color: AppColors.error),
+                      style: TextStyle(fontSize: 13, color: context.error),
                     ),
                   ),
                 const SizedBox(height: 12),
@@ -196,6 +196,7 @@ class _LoginViewState extends State<LoginView> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     primaryButton(
+                      context,
                       L10n.t('login.submit'),
                       onPressed: _busy ? null : _doLogin,
                     ),
@@ -218,7 +219,7 @@ class _LoginViewState extends State<LoginView> {
                     );
                   },
                   child: Text(L10n.t('login.no_account'),
-                      style: const TextStyle(color: AppColors.primary)),
+                      style: TextStyle(color: context.primary)),
                 ),
               ],
             ),
