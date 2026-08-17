@@ -2,17 +2,11 @@ fastapi==0.141.1
 granian==2.8.1
 sqlalchemy[asyncio]==2.0.51
 aiosqlite==0.22.1
-python-multipart==0.0.32
 alembic==1.19.0
 python-jose[cryptography]==3.5.0
 cryptography==50.0.0
 passlib[bcrypt]==1.7.4
 pydantic[email]==2.13.4
 httpx==0.28.1
-flet==0.84.0
-hypothesis==6.165.2
-pytest==9.1.1
-pytest-asyncio==1.4.0
 websockets==17.0.1
-python-i18n[YAML]==0.3.9
 slowapi==0.1.10
