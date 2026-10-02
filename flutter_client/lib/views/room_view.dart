@@ -405,7 +405,7 @@ class _RoomViewState extends State<RoomView> {
       'files': <dynamic>[],
       'author_username': _state.currentUser?.username ?? '?',
       'author_display_name': _state.currentUser?.displayName,
-      'created_at': DateTime.now().toIso8601String(),
+      'created_at': DateTime.now().toUtc().toIso8601String(),
       'is_optimistic': true,
       'is_encrypted': false,
     };
@@ -890,7 +890,12 @@ class _RoomViewState extends State<RoomView> {
 
   String _formatTime(String iso) {
     try {
-      final dt = DateTime.parse(iso).toLocal();
+      // The API serializes timestamps as naive UTC ("2026-10-02T14:57:27"),
+      // which DateTime.parse would read as local time and shift every incoming
+      // message by the UTC offset. Pin it to UTC unless an offset is present.
+      final hasZone = iso.endsWith('Z') ||
+          RegExp(r'[+-]\d{2}:?\d{2}$').hasMatch(iso);
+      final dt = DateTime.parse(hasZone ? iso : '${iso}Z').toLocal();
       final now = DateTime.now();
       if (dt.year == now.year &&
           dt.month == now.month &&

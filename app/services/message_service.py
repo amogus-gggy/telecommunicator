@@ -735,9 +735,18 @@ async def send_encrypted_message(
     try:
         if recipient is not None:
             await manager.send_to_user(recipient.id, frame)
+            delivered = True
+            # Echo the frame back to the sender's own sockets. A 1:1 frame only
+            # goes to the recipient, so without this the sender never learns the
+            # real id/timestamp/file metadata and the client's optimistic
+            # placeholder stays in the list as an unconfirmed send forever.
+            try:
+                await manager.send_to_user(sender_id, frame)
+            except Exception:
+                logger.warning("Sender echo failed for message %s", msg.id)
         else:
             await manager.broadcast(room_id, frame)
-        delivered = True
+            delivered = True
     except Exception:
         delivered = False
 
