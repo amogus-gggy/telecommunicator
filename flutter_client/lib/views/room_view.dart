@@ -17,6 +17,28 @@ import '../state/app_state.dart';
 import '../ui/theme.dart';
 import 'room_settings_view.dart';
 
+/// Order messages the way the server does.
+///
+/// Server ids are the only ordering both the local and the mirrored history
+/// agree on: decryption is asynchronous, so a burst of messages used to be
+/// appended in completion order and the list came out backwards. Locally
+/// pending sends have no id yet and always stay at the bottom, and the `_seq`
+/// insertion counter breaks ties so sorting is stable across rebuilds.
+int compareRoomMessages(Map<String, dynamic> a, Map<String, dynamic> b) {
+  final aPending = a['is_optimistic'] == true;
+  final bPending = b['is_optimistic'] == true;
+  if (aPending != bPending) return aPending ? 1 : -1;
+  final aId = a['id'];
+  final bId = b['id'];
+  if (aId is int && bId is int && aId != bId) return aId.compareTo(bId);
+  final aTime = DateTime.tryParse(a['created_at']?.toString() ?? '');
+  final bTime = DateTime.tryParse(b['created_at']?.toString() ?? '');
+  if (aTime != null && bTime != null && !aTime.isAtSameMomentAs(bTime)) {
+    return aTime.compareTo(bTime);
+  }
+  return (a['_seq'] as int? ?? 0).compareTo(b['_seq'] as int? ?? 0);
+}
+
 class RoomView extends StatefulWidget {
   const RoomView({super.key, required this.state, required this.room});
   final AppState state;
@@ -45,6 +67,17 @@ class _RoomViewState extends State<RoomView> {
 
   final _inviteCtrl = TextEditingController();
   String? _inviteError;
+
+  /// Insertion counter — makes [compareRoomMessages] a total order, so
+  /// re-sorting can never shuffle two messages that would otherwise tie.
+  int _seq = 0;
+
+  void _sortMessages() => _messages.sort(compareRoomMessages);
+
+  bool _hasMessageWithId(Object? id) {
+    if (id == null) return false;
+    return _messages.any((m) => m['id'] == id);
+  }
 
   @override
   void initState() {
@@ -119,7 +152,7 @@ class _RoomViewState extends State<RoomView> {
               '${m['id']}: $e');
         }
       }
-      _scrollToBottom(animate: false);
+      _scrollToBottom(animate: false, force: true);
     } catch (e) {
       print('[DEBUG][loadHistory] error: $e');
       if (!mounted) return;
@@ -128,7 +161,7 @@ class _RoomViewState extends State<RoomView> {
     }
   }
 
-  Future<void> _decryptInto(Map<String, dynamic> msg) async {
+  Future<Map<String, dynamic>?> _decryptInto(Map<String, dynamic> msg) async {
     // Deep-copy into a fully mutable structure — jsonDecode yields unmodifiable
     // nested maps/lists and parts of the decrypt path (and downstream readers)
     // expect to mutate them.
@@ -137,10 +170,19 @@ class _RoomViewState extends State<RoomView> {
     final body = await E2EE.decryptIncoming(_state, m, _room.id);
     print('[DEBUG][decryptInto] decrypted body: $body');
     print('[DEBUG][decryptInto] parsed files after decrypt: ${m['files']}');
-    if (!mounted) return;
+    if (!mounted) return null;
+    // A retried relay re-broadcasts the very same message — without this the
+    // same bubble is appended again on every retry.
+    if (_hasMessageWithId(m['id'])) {
+      print('[DEBUG][decryptInto] duplicate id ${m['id']}, skipping');
+      return null;
+    }
+    final stored = {...m, 'body': body, '_seq': _seq++};
     setState(() {
-      _messages.add({...m, 'body': body});
+      _messages.add(stored);
+      _sortMessages();
     });
+    return stored;
   }
 
   /// Recursively copies JSON-like structures into mutable Dart collections.
@@ -244,14 +286,15 @@ class _RoomViewState extends State<RoomView> {
       // If it's our own optimistic message, replace rather than append.
       final isOwn = _state.currentUser != null &&
           msg['author_username'] == _state.currentUser!.username;
-      await _decryptInto(msg);
+      final stored = await _decryptInto(msg);
       print('[DEBUG][onRoomMessage][encrypted] after decrypt files: ${msg['files']}');
       if (!mounted) return;
-      if (isOwn) {
-        // Remove duplicate optimistic entry if any
+      if (isOwn && stored != null) {
+        // Drop the optimistic placeholder. The comparison has to use the
+        // DECRYPTED body — `msg['body']` is still '' here, so it never matched
+        // and every own message stayed on screen next to its echo.
         final idx = _messages.indexWhere((m) =>
-            m['is_optimistic'] == true &&
-            m['body'] == msg['body']);
+            m['is_optimistic'] == true && m['body'] == stored['body']);
         if (idx >= 0) setState(() => _messages.removeAt(idx));
       }
       _scrollToBottom();
@@ -266,6 +309,10 @@ class _RoomViewState extends State<RoomView> {
       if (msg['room_id'] != _room.id) return;
       final body = msg['body'] as String? ?? '';
       if (!mounted) return;
+      if (_hasMessageWithId(msg['id'])) {
+        print('[DEBUG][onRoomMessage][message] duplicate id ${msg['id']}');
+        return;
+      }
       // Drop the optimistic placeholder we added on send (avoids duplicates
       // and shows the real file attachments from the server).
       final ownIdx = _messages.indexWhere((m) =>
@@ -273,7 +320,10 @@ class _RoomViewState extends State<RoomView> {
       if (ownIdx >= 0) {
         setState(() => _messages.removeAt(ownIdx));
       }
-      setState(() => _messages.add({...msg, 'body': body, 'decrypted': true}));
+      setState(() {
+        _messages.add({...msg, 'body': body, 'decrypted': true, '_seq': _seq++});
+        _sortMessages();
+      });
       print('[DEBUG][onRoomMessage][message] added msg with files: ${msg['files']}');
       _scrollToBottom();
     } else {
@@ -281,8 +331,11 @@ class _RoomViewState extends State<RoomView> {
     }
   }
 
-  void _scrollToBottom({bool animate = true}) {
+  void _scrollToBottom({bool animate = true, bool force = false}) {
     if (!mounted) return;
+    // Auto-scrolling while the user reads older messages is what made the list
+    // jump around; only follow the tail when it is already in view.
+    if (!force && !_atBottom) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollCtrl.hasClients) return;
       if (animate) {

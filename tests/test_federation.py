@@ -148,6 +148,94 @@ async def _sign_headers_for_server(
 
 
 @pytest.mark.asyncio
+async def test_inbound_federation_broadcast_carries_files(
+    client: AsyncClient, test_db: AsyncSession
+):
+    """A relayed message must reach sockets WITH its file metadata.
+
+    The mirror stores only metadata and proxies the bytes on download, so a
+    broadcast without ``files`` leaves the recipient without a download button
+    until the room history is reloaded.
+    """
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from app.ws.connection_manager import manager
+
+    token = await register_and_login(
+        client, "alice_files", "alice_files@example.com", "password123"
+    )
+    room_id = await create_room_and_get_id(client, token, "fed-file-room")
+
+    private = Ed25519PrivateKey.generate()
+    test_db.add(
+        Server(
+            server_name="remote-c",
+            base_url="http://remote-c:8000",
+            is_local=False,
+            public_key=private.public_key().public_bytes_raw(),
+        )
+    )
+    bob = await cache_remote_user(test_db, "bob", "remote-c", display_name="Bob")
+    test_db.add(RoomMember(room_id=room_id, user_id=bob.id))
+    await test_db.commit()
+
+    class FakeWs:
+        def __init__(self):
+            self.received = []
+
+        async def send_json(self, payload):
+            self.received.append(payload)
+
+    fake = FakeWs()
+    await manager.connect(room_id, fake, bob.id)
+
+    path = f"/federation/rooms/{room_id}/message"
+    body = {
+        "sender": {
+            "username": "bob",
+            "server_name": "remote-c",
+            "display_name": "Bob",
+        },
+        "payload": {
+            "body": "see attachment",
+            "is_encrypted": False,
+            "files": [
+                {
+                    "id": 4242,
+                    "filename": "report.pdf",
+                    "is_encrypted": True,
+                    "key_blob": base64.b64encode(b"filekey").decode(),
+                    "uploader_username": "bob@remote-c",
+                    "origin_server_name": "remote-c",
+                }
+            ],
+        },
+    }
+    headers = await _sign_headers_for_server("remote-c", path, body, private)
+    raw = headers.pop("_raw")
+    resp = await client.post(path, content=raw, headers=headers)
+    assert resp.status_code == 200, resp.text
+
+    assert fake.received, "relayed message was not broadcast to the room"
+    frame = fake.received[0]
+    assert frame["type"] == "message"
+    files = frame["payload"].get("files")
+    assert files, "broadcast frame has no files — download button would be missing"
+
+    meta = files[0]
+    assert meta["filename"] == "report.pdf"
+    assert meta["is_encrypted"] is True
+    assert meta["key_blob"] == base64.b64encode(b"filekey").decode()
+    assert meta["origin_server_name"] == "remote-c"
+    assert meta["uploader_username"] == "bob@remote-c"
+    # The id is the mirror's own row — the download endpoint proxies from there.
+    assert isinstance(meta["id"], int)
+    assert meta["id"] != 4242
+
+    await manager.disconnect(room_id, fake)
+
+
+@pytest.mark.asyncio
 async def test_inbound_rejects_non_member_author(
     client: AsyncClient, test_db: AsyncSession
 ):

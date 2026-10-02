@@ -202,11 +202,51 @@ async def _persist_payload_message(
     return msg
 
 
+def _file_meta(f: File, uploader_handle: str) -> dict:
+    """Client-facing metadata for one attached file.
+
+    ``origin_server_name`` tells the client which homeserver holds the bytes;
+    on a mirror the download endpoint proxies them back to the origin.
+    """
+    return {
+        "id": f.id,
+        "filename": f.filename,
+        "room_id": f.room_id,
+        "uploader_id": f.uploader_id,
+        "uploader_username": uploader_handle,
+        "created_at": f.created_at.isoformat(),
+        "is_encrypted": f.is_encrypted,
+        "key_blob": f.key_blob,
+        "key_sender_blob": f.key_sender_blob,
+        "key_signature": f.key_signature,
+        "origin_server_name": f.origin_server_name or SERVER_NAME,
+    }
+
+
+async def _attached_files(
+    db: AsyncSession, msg: Message, uploader_handle: str
+) -> list[dict]:
+    """Metadata for the files attached to a just-persisted message.
+
+    The rows were written after ``msg`` was refreshed, so the relationship has
+    to be re-read — otherwise sockets would be told the message has no files
+    and clients would only show them after a history reload.
+    """
+    result = await db.execute(
+        select(Message).options(selectinload(Message.files)).where(Message.id == msg.id)
+    )
+    loaded = result.scalar_one_or_none()
+    if loaded is None:
+        return []
+    return [_file_meta(f, uploader_handle) for f in (loaded.files or [])]
+
+
 async def _broadcast_payload(
     db: AsyncSession, room: Room, author: User, msg: Message, payload: dict
 ) -> None:
     is_encrypted = bool(payload.get("is_encrypted"))
     author_handle = _author_handle(author)
+    files_payload = await _attached_files(db, msg, author_handle)
     if is_encrypted:
         await manager.broadcast(
             room.id,
@@ -222,7 +262,7 @@ async def _broadcast_payload(
                     "signature": payload.get("signature"),
                     "is_encrypted": True,
                     "created_at": msg.created_at.isoformat(),
-                    "files": [],
+                    "files": files_payload,
                 },
             },
         )
@@ -239,7 +279,7 @@ async def _broadcast_payload(
                 "author_display_name": author.display_name,
                 "body": payload.get("body"),
                 "created_at": msg.created_at.isoformat(),
-                "files": [],
+                "files": files_payload,
             },
         },
     )
@@ -670,28 +710,7 @@ async def send_encrypted_message(
 
     # Load associated files for the WS payload
     sender_username = _author_handle(sender)
-    msg_with_files = await db.execute(
-        select(Message)
-        .options(selectinload(Message.files))
-        .where(Message.id == msg.id)
-    )
-    msg_loaded = msg_with_files.scalar_one()
-    files_payload = [
-        {
-            "id": f.id,
-            "filename": f.filename,
-            "room_id": f.room_id,
-            "uploader_id": f.uploader_id,
-            "uploader_username": sender_username,
-            "created_at": f.created_at.isoformat(),
-            "is_encrypted": f.is_encrypted,
-            "key_blob": f.key_blob,
-            "key_sender_blob": f.key_sender_blob,
-            "key_signature": f.key_signature,
-            "origin_server_name": SERVER_NAME,
-        }
-        for f in (msg_loaded.files or [])
-    ]
+    files_payload = await _attached_files(db, msg, sender_username)
 
     frame = {
         "type": "encrypted_message",
