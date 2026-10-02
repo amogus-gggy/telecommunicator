@@ -152,6 +152,8 @@ class L10n {
       'room.encrypted_bad_signature': '⚠️ [Security warning: message signature invalid]',
       'room.encrypted_bad_key': '🔒 [Decryption error: invalid key or tampered message]',
       'room.encrypted_key_gone': '🔒 [Encrypted message — key no longer available]',
+      'room.encrypted_too_far_ahead':
+          '🔒 [Decryption error: too many messages missed, session cannot catch up]',
       'room.encrypted_error': '🔒 [Decryption error: %{exc}]',
       'room.send_error': 'Failed to send message: %{exc}',
       'room.attach_file': 'Attach file',
@@ -298,6 +300,8 @@ class L10n {
       'room.encrypted_bad_signature': '⚠️ [Предупреждение безопасности: подпись сообщения недействительна]',
       'room.encrypted_bad_key': '🔒 [Ошибка расшифровки: неверный ключ или сообщение изменено]',
       'room.encrypted_key_gone': '🔒 [Зашифрованное сообщение — ключ больше недоступен]',
+      'room.encrypted_too_far_ahead':
+          '🔒 [Ошибка расшифровки: пропущено слишком много сообщений, сессия не восстанавливается]',
       'room.encrypted_error': '🔒 [Ошибка расшифровки: %{exc}]',
       'room.send_error': 'Не удалось отправить сообщение: %{exc}',
       'room.attach_file': 'Прикрепить файл',

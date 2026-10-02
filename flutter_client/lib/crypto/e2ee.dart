@@ -148,9 +148,17 @@ class E2EE {
     } catch (e) {
       msg['decryption_error'] = true;
       final s = e.toString();
+      // The UI shows one generic "invalid key" string, so without this the log
+      // was the only place a real reason (a stale session, a gap in delivery,
+      // a broken ratchet state) could surface.
+      print('[E2EE] decrypt failed: msg=${msg['id']} from=$senderUsername '
+          'room=$roomId error=$e');
       if (s.contains('signature')) return L10n.t('room.encrypted_bad_signature');
       if (s.contains('consumed') || s.contains('gone')) {
         return L10n.t('room.encrypted_key_gone');
+      }
+      if (s.contains('cannot skip')) {
+        return L10n.t('room.encrypted_too_far_ahead');
       }
       return L10n.t('room.encrypted_bad_key');
     }

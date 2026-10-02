@@ -168,16 +168,14 @@ class RatchetDecryptor {
       await store.put(peerKey, state);
       return plaintext;
     } on Exception {
-      // Heal by re-initializing as responder from the signed header.
-      try {
-        final (plaintext, state) =
-            await tryDecrypt(await initBob(myPrivRaw, senderIdPubRaw, headerDh));
-        await store.put(peerKey, state);
-        return plaintext;
-      } catch (e) {
-        await store.delete(peerKey);
-        rethrow;
-      }
+      // Heal by re-initializing as responder from the signed header. This can
+      // only succeed when the stored session is stale, so on failure the
+      // stored state must be kept: dropping it would leave us with no chain
+      // at all, and every later message of that peer would fail as well.
+      final (plaintext, state) =
+          await tryDecrypt(await initBob(myPrivRaw, senderIdPubRaw, headerDh));
+      await store.put(peerKey, state);
+      return plaintext;
     }
   }
 }

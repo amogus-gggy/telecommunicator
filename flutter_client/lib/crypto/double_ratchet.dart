@@ -75,8 +75,12 @@ class RatchetState {
     this.nS = 0,
     this.nR = 0,
     this.pn = 0,
-    this.skipped = const {},
-  });
+    Map<String, Uint8List>? skipped,
+    // Copied, never aliased: a `const {}` default would make every state that
+    // was not round-tripped through [RatchetState.fromDict] throw
+    // "Cannot modify unmodifiable map" the first time a skipped message key
+    // has to be derived — i.e. whenever the client was offline for a message.
+  }) : skipped = Map<String, Uint8List>.of(skipped ?? const {});
 
   final Uint8List peerIdentityPub;
   Uint8List rootKey;
