@@ -1,0 +1,2 @@
+plaintext test file for E2EE file encryption
+line two

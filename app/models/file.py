@@ -21,6 +21,11 @@ class File(Base):
     )
     created_at = Column(DateTime, default=func.now(), nullable=False)
 
+    # Federated files: the encrypted bytes live on the origin homeserver, so the
+    # receiving server stores only metadata + a pointer used to proxy downloads.
+    origin_server_name = Column(String, nullable=True)
+    origin_file_id = Column(Integer, nullable=True)
+
     # E2EE fields
     is_encrypted = Column(Boolean, nullable=False, default=False)
     key_blob = Column(Text, nullable=True)  # base64 JSON — recipient key blob

@@ -4,12 +4,14 @@ from fastapi import (
     HTTPException,
     Request,
 )
-from fastapi.responses import FileResponse as FastAPIFileResponse
+from fastapi.responses import FileResponse as FastAPIFileResponse, StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
 from app.auth.deps import get_current_user
 from app.db.deps import get_db
+from app.models.remote_room_link import RemoteRoomLink
 from app.models.user import User
 from app.schemas.rooms import (
     PermissionUpdate,
@@ -17,10 +19,52 @@ from app.schemas.rooms import (
     RoomResponse,
     PersonalChatRequest,
 )
-from app.services import room_service, file_service
+from app.services import room_service, file_service, federation_service as fed
 from app.schemas.files import FileResponse
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
+
+
+async def _resolve_origin_room_id(db: AsyncSession, file) -> int:
+    """Map a local mirror room id to the file's origin (hosting) room id."""
+    result = await db.execute(
+        select(RemoteRoomLink).where(
+            RemoteRoomLink.room_id == file.room_id,
+            RemoteRoomLink.server_name == file.origin_server_name,
+        )
+    )
+    link = result.scalar_one_or_none()
+    return link.remote_room_id if link is not None else file.room_id
+
+
+async def _proxy_federated_file(db: AsyncSession, file):
+    """Stream a federated file's bytes from its origin homeserver.
+
+    The encrypted bytes never leave the origin server; the recipient's local
+    server forwards a server-to-server signed request and pipes the response to
+    the client (who decrypts it locally with their own key material).
+    """
+    server = await fed.ensure_server(db, file.origin_server_name)
+    origin_room_id = await _resolve_origin_room_id(db, file)
+    path = f"/federation/rooms/{origin_room_id}/files/{file.origin_file_id}/fetch"
+    try:
+        upstream = await fed.send_to_server(db, server, "POST", path, {})
+    except HTTPException:
+        raise
+    if upstream.status_code != 200:
+        raise HTTPException(502, f"Origin returned {upstream.status_code}")
+
+    async def _stream():
+        async for chunk in upstream.aiter_bytes(chunk_size=65536):
+            yield chunk
+
+    return StreamingResponse(
+        _stream(),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{file.filename}"'
+        },
+    )
 
 
 @router.post("", response_model=RoomResponse, status_code=201)
@@ -165,6 +209,9 @@ async def download_file(
 
     if file.room_id != room_id:
         raise HTTPException(404)
+
+    if file.origin_server_name:
+        return await _proxy_federated_file(db, file)
 
     return FastAPIFileResponse(
         file.path, filename=file.filename, media_type="application/octet-stream"

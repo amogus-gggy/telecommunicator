@@ -197,7 +197,14 @@ def _ip_is_blocked(ip: ipaddress._BaseAddress) -> bool:
     RFC1918 private ranges are blocked by default and only reachable when
     ``FED_ALLOW_PRIVATE_NETWORKS=1`` (typical for two servers on one machine
     during development).
+
+    Loopback is checked before the reserved range because Python reports the
+    IPv6 loopback (``::1``) as ``is_reserved`` — otherwise the escape hatch
+    above would never apply to a host that resolves to ``::1`` first, as
+    ``localhost`` does.
     """
+    if ip.is_loopback:
+        return not _SSRF_ALLOW_PRIVATE
     if (
         ip.is_link_local
         or ip.is_unspecified
@@ -207,7 +214,7 @@ def _ip_is_blocked(ip: ipaddress._BaseAddress) -> bool:
         return True
     if _SSRF_ALLOW_PRIVATE:
         return False
-    return bool(ip.is_loopback or ip.is_private)
+    return ip.is_private
 
 
 def host_looks_blocked(host: str) -> bool:

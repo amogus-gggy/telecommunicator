@@ -51,6 +51,7 @@ def _relay_payload(
     is_encrypted: bool = False,
     created_at: datetime | None = None,
     event_id: str | None = None,
+    files: list[dict] | None = None,
 ) -> dict:
     return {
         "event_id": event_id or _new_event_id(),
@@ -59,7 +60,8 @@ def _relay_payload(
         "encrypted_blob": base64.b64encode(encrypted_blob).decode()
         if encrypted_blob
         else None,
-        "sender_encrypted_blob": base64.b64encode(sender_encrypted_blob).decode()
+        "sender_encrypted_blob": base64.b64encode(
+            sender_encrypted_blob).decode()
         if sender_encrypted_blob
         else None,
         "signature": base64.b64encode(signature).decode() if signature else None,
@@ -69,6 +71,9 @@ def _relay_payload(
             else None
         ),
         "created_at": (created_at or datetime.now(timezone.utc)).isoformat(),
+        # Federated file transfer: the receiving server stores only metadata and
+        # proxies the encrypted bytes back to the origin homeserver on download.
+        "files": files or [],
     }
 
 
@@ -87,6 +92,13 @@ def _author_handle(user: User | None) -> str:
     if user.server_name and user.server_name != SERVER_NAME:
         return f"{user.username}@{user.server_name}"
     return user.username
+
+
+def _server_from_handle(handle: str | None) -> str | None:
+    """Return the ``@server`` part of a ``username@server`` handle, if any."""
+    if not handle or "@" not in handle:
+        return None
+    return handle.rsplit("@", 1)[1] or None
 
 
 async def _persist_payload_message(
@@ -152,7 +164,81 @@ async def _persist_payload_message(
     db.add(msg)
     await db.commit()
     await db.refresh(msg)
+
+    # Federated file transfer: the encrypted bytes live on the origin homeserver,
+    # so the receiving server only stores metadata + a pointer for download proxy.
+    for fmeta in payload.get("files") or []:
+        origin_server_name = fmeta.get("origin_server_name") or _server_from_handle(
+            fmeta.get("uploader_username")
+        )
+        origin_file_id = fmeta.get("id")
+        if not origin_server_name or origin_file_id is None:
+            continue
+        existing = await db.execute(
+            select(File).where(
+                File.message_id == msg.id,
+                File.origin_server_name == origin_server_name,
+                File.origin_file_id == origin_file_id,
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            continue
+        db.add(
+            File(
+                filename=fmeta.get("filename"),
+                path="",
+                uploader_id=author.id,
+                room_id=room.id,
+                is_encrypted=bool(fmeta.get("is_encrypted")),
+                key_blob=fmeta.get("key_blob"),
+                key_sender_blob=fmeta.get("key_sender_blob"),
+                key_signature=fmeta.get("key_signature"),
+                message_id=msg.id,
+                origin_server_name=origin_server_name,
+                origin_file_id=origin_file_id,
+            )
+        )
+    await db.commit()
     return msg
+
+
+def _file_meta(f: File, uploader_handle: str) -> dict:
+    """Client-facing metadata for one attached file.
+
+    ``origin_server_name`` tells the client which homeserver holds the bytes;
+    on a mirror the download endpoint proxies them back to the origin.
+    """
+    return {
+        "id": f.id,
+        "filename": f.filename,
+        "room_id": f.room_id,
+        "uploader_id": f.uploader_id,
+        "uploader_username": uploader_handle,
+        "created_at": f.created_at.isoformat(),
+        "is_encrypted": f.is_encrypted,
+        "key_blob": f.key_blob,
+        "key_sender_blob": f.key_sender_blob,
+        "key_signature": f.key_signature,
+        "origin_server_name": f.origin_server_name or SERVER_NAME,
+    }
+
+
+async def _attached_files(
+    db: AsyncSession, msg: Message, uploader_handle: str
+) -> list[dict]:
+    """Metadata for the files attached to a just-persisted message.
+
+    The rows were written after ``msg`` was refreshed, so the relationship has
+    to be re-read — otherwise sockets would be told the message has no files
+    and clients would only show them after a history reload.
+    """
+    result = await db.execute(
+        select(Message).options(selectinload(Message.files)).where(Message.id == msg.id)
+    )
+    loaded = result.scalar_one_or_none()
+    if loaded is None:
+        return []
+    return [_file_meta(f, uploader_handle) for f in (loaded.files or [])]
 
 
 async def _broadcast_payload(
@@ -160,6 +246,7 @@ async def _broadcast_payload(
 ) -> None:
     is_encrypted = bool(payload.get("is_encrypted"))
     author_handle = _author_handle(author)
+    files_payload = await _attached_files(db, msg, author_handle)
     if is_encrypted:
         await manager.broadcast(
             room.id,
@@ -175,7 +262,7 @@ async def _broadcast_payload(
                     "signature": payload.get("signature"),
                     "is_encrypted": True,
                     "created_at": msg.created_at.isoformat(),
-                    "files": [],
+                    "files": files_payload,
                 },
             },
         )
@@ -192,7 +279,7 @@ async def _broadcast_payload(
                 "author_display_name": author.display_name,
                 "body": payload.get("body"),
                 "created_at": msg.created_at.isoformat(),
-                "files": [],
+                "files": files_payload,
             },
         },
     )
@@ -442,13 +529,31 @@ async def send_message(
 
     # Federated delivery: fan out to remote mirrors / forward to the host.
     try:
+        relay_files = [
+            {
+                "id": f.id,
+                "filename": f.filename,
+                "is_encrypted": f.is_encrypted,
+                "key_blob": f.key_blob,
+                "key_sender_blob": f.key_sender_blob,
+                "key_signature": f.key_signature,
+                "uploader_username": author.username,
+                "origin_server_name": SERVER_NAME,
+            }
+            for f in (message_with_files.files or [])
+        ]
         await _relay_message(
             db,
             room,
             author,
-            _relay_payload(author=author, body=body, event_id=msg.event_id),
+            _relay_payload(
+                author=author,
+                body=body,
+                event_id=msg.event_id,
+                files=relay_files,
+            ),
         )
-    except HTTPException:
+    except Exception:
         pass  # Single-server operation must not fail because of a remote.
 
     return response
@@ -605,27 +710,7 @@ async def send_encrypted_message(
 
     # Load associated files for the WS payload
     sender_username = _author_handle(sender)
-    msg_with_files = await db.execute(
-        select(Message)
-        .options(selectinload(Message.files))
-        .where(Message.id == msg.id)
-    )
-    msg_loaded = msg_with_files.scalar_one()
-    files_payload = [
-        {
-            "id": f.id,
-            "filename": f.filename,
-            "room_id": f.room_id,
-            "uploader_id": f.uploader_id,
-            "uploader_username": sender_username,
-            "created_at": f.created_at.isoformat(),
-            "is_encrypted": f.is_encrypted,
-            "key_blob": f.key_blob,
-            "key_sender_blob": f.key_sender_blob,
-            "key_signature": f.key_signature,
-        }
-        for f in (msg_loaded.files or [])
-    ]
+    files_payload = await _attached_files(db, msg, sender_username)
 
     frame = {
         "type": "encrypted_message",
@@ -650,9 +735,18 @@ async def send_encrypted_message(
     try:
         if recipient is not None:
             await manager.send_to_user(recipient.id, frame)
+            delivered = True
+            # Echo the frame back to the sender's own sockets. A 1:1 frame only
+            # goes to the recipient, so without this the sender never learns the
+            # real id/timestamp/file metadata and the client's optimistic
+            # placeholder stays in the list as an unconfirmed send forever.
+            try:
+                await manager.send_to_user(sender_id, frame)
+            except Exception:
+                logger.warning("Sender echo failed for message %s", msg.id)
         else:
             await manager.broadcast(room_id, frame)
-        delivered = True
+            delivered = True
     except Exception:
         delivered = False
 
@@ -676,6 +770,7 @@ async def send_encrypted_message(
                 recipient=recipient,
                 is_encrypted=True,
                 event_id=msg.event_id,
+                files=files_payload,
             ),
         )
     except Exception:

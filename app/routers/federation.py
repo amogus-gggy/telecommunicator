@@ -5,8 +5,10 @@ protected by the federated Ed25519 signature scheme.
 """
 
 import base64
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -346,3 +348,31 @@ async def federation_room_membership(
         db, room, member, event_type, include_ids=include_ids
     )
     return {"status": "ok", "room_id": room.id}
+
+
+@router.post("/rooms/{room_id}/files/{file_id}/fetch")
+async def federation_file_fetch(
+    room_id: int,
+    file_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve federated file bytes to another homeserver.
+
+    Called server-to-server (signed). The requesting server is the recipient's
+    own homeserver, which already enforced room membership before proxying, so
+    we only need to confirm the file belongs to the requested room.
+    """
+    raw = await _read_body(request)
+    await verify_request(db, request, raw)
+    from app.models.file import File
+
+    result = await db.execute(select(File).where(File.id == file_id))
+    file = result.scalar_one_or_none()
+    if file is None or file.room_id != room_id:
+        raise HTTPException(status_code=404, detail="File not found")
+    if not file.path or not os.path.exists(file.path):
+        raise HTTPException(status_code=404, detail="File bytes unavailable")
+    return FileResponse(
+        file.path, filename=file.filename, media_type="application/octet-stream"
+    )
