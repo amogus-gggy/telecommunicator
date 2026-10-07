@@ -7,3 +7,4 @@ __pycache__
 messenger.db
 client/build
 uploads
+venv
