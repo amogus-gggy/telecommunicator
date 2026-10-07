@@ -105,3 +105,37 @@ async def test_change_password_wrong_current_401(client: AsyncClient):
         headers=auth(token),
     )
     assert resp.status_code == 401
+
+async def _register(client, username, email):
+    import base64 as b64
+
+    payload = {
+        "username": username,
+        "email": email,
+        "password": "securepass",
+        "identity_pub_ed25519": b64.b64encode(b"\x01" * 32).decode(),
+        "identity_pub_x25519": b64.b64encode(b"\x02" * 32).decode(),
+        "encrypted_backup": b64.b64encode(b"\x03" * 64).decode(),
+    }
+    r = await client.post("/auth/register", json=payload)
+    assert r.status_code == 201, r.text
+    return r.json()["access_token"]
+
+
+async def test_first_user_is_admin_and_admin_stats(client):
+    t1 = await _register(client, "boss", "boss@example.com")
+    t2 = await _register(client, "peon", "peon@example.com")
+    headers = {"Authorization": f"Bearer {t1}"}
+    r = await client.get("/admin/stats", headers=headers)
+    assert r.status_code == 200
+    assert r.json()["local_users"] == 2
+    r = await client.get("/admin/users", headers=headers)
+    assert r.status_code == 200
+    users = r.json()
+    assert users[0]["username"] == "boss" and users[0]["is_admin"] is True
+    assert users[1]["is_admin"] is False
+    # non-admin gets 403
+    r = await client.get(
+        "/admin/stats", headers={"Authorization": f"Bearer {t2}"}
+    )
+    assert r.status_code == 403

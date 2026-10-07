@@ -8,6 +8,7 @@ class UserProfile(BaseModel):
     display_name: str | None
     server_name: str | None = None
     is_remote: bool | None = False
+    is_admin: bool | None = False
 
     model_config = {"from_attributes": True}
 

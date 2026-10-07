@@ -22,6 +22,7 @@ class User(Base):
     # True for a cached copy of a user that lives on a remote server.
     is_remote: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     email: Mapped[str] = mapped_column(String(256), unique=True, nullable=False)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default='0')
     display_name: Mapped[str | None] = mapped_column(String(64))
     hashed_password: Mapped[str] = mapped_column(nullable=False)
     created_at: Mapped[datetime] = mapped_column(default=func.now())

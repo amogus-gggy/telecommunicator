@@ -10,6 +10,8 @@ class RegisterRequest(BaseModel):
     identity_pub_ed25519: str  # base64-encoded Ed25519 public key
     identity_pub_x25519: str  # base64-encoded X25519 public key
     encrypted_backup: str  # base64-encoded encrypted key backup
+    pow_challenge: Optional[str] = None
+    pow_nonce: Optional[str] = None
 
 
 class RegisterResponse(BaseModel):
@@ -22,6 +24,8 @@ class RegisterResponse(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+    pow_challenge: Optional[str] = None
+    pow_nonce: Optional[str] = None
 
 
 class TokenResponse(BaseModel):

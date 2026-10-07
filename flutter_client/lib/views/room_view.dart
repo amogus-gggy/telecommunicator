@@ -685,8 +685,6 @@ class _RoomViewState extends State<RoomView> {
     final isEncryptedError = m['decryption_error'] == true;
 
     final files = (m['files'] as List? ?? []);
-    print('[DEBUG][buildMessage] id=${m['id']} body="$body" '
-        'filesCount=${files.length} files=$files');
     final fileCards = files
         .map<Widget>((f) =>
             _buildFileCard(Map<String, dynamic>.from(f as Map), m, isOwn: isOwn))

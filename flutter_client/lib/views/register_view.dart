@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../config.dart';
 import '../crypto/key_backup.dart';
+import '../crypto/pow.dart';
 import '../crypto/keys.dart';
 import '../l10n/strings.dart';
 import '../state/app_state.dart';
@@ -89,6 +90,7 @@ class _RegisterViewState extends State<RegisterView> {
       final encryptedBackup = await KeyBackupManager.encryptBackup(
         edPriv, xPriv, _passwordCtrl.text);
 
+      final pow = await obtainPow(client);
       await client.register(
         username: username,
         email: _emailCtrl.text,
@@ -96,6 +98,8 @@ class _RegisterViewState extends State<RegisterView> {
         identityPubEd25519: base64Encode(edPub),
         identityPubX25519: base64Encode(xPub),
         encryptedBackup: base64Encode(encryptedBackup),
+        powChallenge: pow?.$1,
+        powNonce: pow?.$2,
       );
 
       state.crypto = CryptoKeys(
@@ -105,7 +109,9 @@ class _RegisterViewState extends State<RegisterView> {
         x25519Public: xPub,
       );
 
-      final tokenData = await client.login(username, _passwordCtrl.text);
+      final pow2 = await obtainPow(client);
+      final tokenData = await client.login(username, _passwordCtrl.text,
+          powChallenge: pow2?.$1, powNonce: pow2?.$2);
       state.token = tokenData['access_token'] as String;
       final me = await client.getMe();
       state.currentUser = UserDTO.fromJson(me);

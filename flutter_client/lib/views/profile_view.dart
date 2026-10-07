@@ -5,6 +5,8 @@ import '../config.dart';
 import '../l10n/strings.dart';
 import '../state/app_state.dart';
 import '../ui/theme.dart';
+import 'admin_view.dart';
+import 'deploy_view.dart';
 import 'login_view.dart';
 
 class ProfileView extends StatefulWidget {
@@ -47,6 +49,7 @@ class _ProfileViewState extends State<ProfileView> {
         email: user.email,
         displayName: me['display_name'] as String?,
         serverName: user.serverName,
+        isAdmin: user.isAdmin,
       );
       if (!mounted) return;
       setState(() => _busy = false);
@@ -328,6 +331,27 @@ class _ProfileViewState extends State<ProfileView> {
                   onChanged: (v) => _setTheme(v ?? 'system'),
                 ),
               ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (user.isAdmin)
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.admin_panel_settings),
+                title: const Text('Admin panel'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => navigatePush(
+                    context, AdminView(state: widget.state)),
+              ),
+            ),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.cloud_upload),
+              title: const Text('Deploy to my VPS'),
+              subtitle: const Text('Install the server on your own VPS'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => navigatePush(
+                  context, DeployView(state: widget.state)),
             ),
           ),
           const SizedBox(height: 24),

@@ -1,7 +1,7 @@
 services:
   api:
     build: .
-    image: telecommunicator-api
+    image: ghcr.io/amogus-gggy/telecommunicator
     container_name: telecommunicator-api
     restart: unless-stopped
     env_file:

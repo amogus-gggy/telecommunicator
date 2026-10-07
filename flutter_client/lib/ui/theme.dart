@@ -4,23 +4,23 @@ library;
 import 'package:flutter/material.dart';
 
 class AppColors {
-  static const Color primary = Color(0xFF6750A4);
-  static const Color surfaceContainer = Color(0xFFF3EDF7);
-  static const Color surfaceContainerHigh = Color(0xFFECE6F0);
-  static const Color surface = Color(0xFFFEF7FF);
-  static const Color outlineVariant = Color(0xFFCAC4D0);
-  static const Color onSurface = Color(0xFF1D1B20);
-  static const Color onSurfaceVariant = Color(0xFF49454F);
+  static const Color primary = Color(0xFF229ED9);
+  static const Color surfaceContainer = Color(0xFFFFFFFF);
+  static const Color surfaceContainerHigh = Color(0xFFF4F4F5);
+  static const Color surface = Color(0xFFFFFFFF);
+  static const Color outlineVariant = Color(0xFFDADADA);
+  static const Color onSurface = Color(0xFF000000);
+  static const Color onSurfaceVariant = Color(0xFF707579);
   static const Color onPrimary = Colors.white;
   static const Color error = Color(0xFFB3261E);
 
-  static const Color darkPrimary = Color(0xFFD0BCFF);
-  static const Color darkSurfaceContainer = Color(0xFF211F26);
-  static const Color darkSurfaceContainerHigh = Color(0xFF2B2930);
-  static const Color darkSurface = Color(0xFF141218);
-  static const Color darkOutlineVariant = Color(0xFF49454F);
-  static const Color darkOnSurface = Color(0xFFE6E0E9);
-  static const Color darkOnSurfaceVariant = Color(0xFFCAC4D0);
+  static const Color darkPrimary = Color(0xFF8E7CE8);
+  static const Color darkSurfaceContainer = Color(0xFF0E1621);
+  static const Color darkSurfaceContainerHigh = Color(0xFF212121);
+  static const Color darkSurface = Color(0xFF212121);
+  static const Color darkOutlineVariant = Color(0xFF2B2B2B);
+  static const Color darkOnSurface = Color(0xFFF5F5F5);
+  static const Color darkOnSurfaceVariant = Color(0xFF8A8A8A);
 }
 
 /// Theme-aware color accessors resolving against the current [ColorScheme].
@@ -47,7 +47,7 @@ ThemeData lightTheme() => ThemeData(
         seedColor: AppColors.primary,
         brightness: Brightness.light,
       ),
-      scaffoldBackgroundColor: AppColors.surfaceContainer,
+      scaffoldBackgroundColor: AppColors.surfaceContainerHigh,
       snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating),
     );
 
@@ -58,13 +58,12 @@ ThemeData darkTheme() => ThemeData(
         seedColor: AppColors.primary,
         brightness: Brightness.dark,
       ),
-      scaffoldBackgroundColor: AppColors.darkSurfaceContainer,
+      scaffoldBackgroundColor: AppColors.darkSurfaceContainerHigh,
       snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating),
     );
 
 /// Round avatar with the first letters of the display name.
 Widget initialsAvatar(BuildContext context, String name, {double size = 44}) {
-  final primary = Theme.of(context).colorScheme.primary;
   final parts = name
       .trim()
       .split(RegExp(r'\s+'))
@@ -80,15 +79,26 @@ Widget initialsAvatar(BuildContext context, String name, {double size = 44}) {
     initials = (parts[0].substring(0, 1) + parts[1].substring(0, 1))
         .toUpperCase();
   }
+  const palette = [
+    Color(0xFFE17076),
+    Color(0xFF7BC862),
+    Color(0xFFE5CA77),
+    Color(0xFF65AADD),
+    Color(0xFFA695E7),
+    Color(0xFFEE7AB6),
+    Color(0xFF6EC9CB),
+    Color(0xFFFAA774),
+  ];
+  final bg = palette[name.hashCode.abs() % palette.length];
   return CircleAvatar(
     radius: size / 2,
-    backgroundColor: primary.withValues(alpha: 0.15),
+    backgroundColor: bg,
     child: Text(
       initials,
       style: TextStyle(
         fontSize: size * 0.36,
         fontWeight: FontWeight.w600,
-        color: primary,
+        color: Colors.white,
       ),
     ),
   );

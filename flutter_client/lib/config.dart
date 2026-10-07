@@ -58,6 +58,7 @@ class UserDTO {
     required this.email,
     this.displayName,
     this.serverName = '',
+    this.isAdmin = false,
   });
 
   final int id;
@@ -65,6 +66,7 @@ class UserDTO {
   final String email;
   final String? displayName;
   final String serverName;
+  final bool isAdmin;
 
   factory UserDTO.fromJson(Map<String, dynamic> j) => UserDTO(
         id: j['id'] as int,
@@ -72,6 +74,7 @@ class UserDTO {
         email: j['email'] as String? ?? '',
         displayName: j['display_name'] as String?,
         serverName: (j['server_name'] as String?) ?? '',
+        isAdmin: j['is_admin'] as bool? ?? false,
       );
 }
 
@@ -86,6 +89,7 @@ class RoomDTO {
     required this.allowMemberInvite,
     required this.readOnly,
     this.serverName = '',
+    this.isAdmin = false,
     this.remoteRoomId,
     this.participants = const [],
   });
@@ -99,6 +103,7 @@ class RoomDTO {
   final bool allowMemberInvite;
   final bool readOnly;
   final String serverName;
+  final bool isAdmin;
   final int? remoteRoomId;
   final List<String> participants;
 

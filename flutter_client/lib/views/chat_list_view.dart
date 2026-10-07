@@ -29,6 +29,7 @@ class _ChatListViewState extends State<ChatListView>
   final List<Map<String, dynamic>> _personal = [];
   final List<Map<String, dynamic>> _groups = [];
   final List<Map<String, dynamic>> _public = [];
+  RoomDTO? _selectedRoom;
 
   Timer? _searchDebounce;
   UnifiedWsClient? _ws;
@@ -111,9 +112,13 @@ class _ChatListViewState extends State<ChatListView>
       final room = RoomDTO.fromJson(Map<String, dynamic>.from(data as Map));
       if (!mounted) return;
       Navigator.of(context).pop(); // close dialog
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => RoomView(state: widget.state, room: room),
-      ));
+      if (_wide) {
+        setState(() => _selectedRoom = room);
+      } else {
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => RoomView(state: widget.state, room: room),
+        ));
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _personalError = e.toString());
@@ -133,9 +138,13 @@ class _ChatListViewState extends State<ChatListView>
       final room = RoomDTO.fromJson(Map<String, dynamic>.from(data as Map));
       if (!mounted) return;
       Navigator.of(context).pop();
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => RoomView(state: widget.state, room: room),
-      ));
+      if (_wide) {
+        setState(() => _selectedRoom = room);
+      } else {
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => RoomView(state: widget.state, room: room),
+        ));
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _groupError = e.toString());
@@ -193,6 +202,8 @@ class _ChatListViewState extends State<ChatListView>
   }
 
   Widget _buildTile(Map<String, dynamic> room) {
+    final selected = _selectedRoom != null &&
+        _selectedRoom!.id == room['id'];
     final name = _displayName(room);
     final type = room['room_type'] as String? ?? 'public';
     final icon = type == 'personal'
@@ -212,10 +223,22 @@ class _ChatListViewState extends State<ChatListView>
 
     return InkWell(
       borderRadius: BorderRadius.circular(12),
-      onTap: () => _openRoom(room),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
+      onTap: () {
+        final roomDto = RoomDTO.fromJson(Map<String, dynamic>.from(room));
+        if (_wide) {
+          setState(() => _selectedRoom = roomDto);
+        } else {
+          _openRoom(room);
+        }
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: selected ? context.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
           children: [
             Stack(
               clipBehavior: Clip.none,
@@ -241,17 +264,22 @@ class _ChatListViewState extends State<ChatListView>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(name,
-                      style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w600)),
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: selected ? Colors.white : context.onSurface)),
                   Text(subtitle,
                       style: TextStyle(
-                          fontSize: 12.5, color: context.onSurfaceVariant)),
+                          fontSize: 12.5,
+                          color: selected
+                              ? Colors.white70
+                              : context.onSurfaceVariant)),
                 ],
               ),
             ),
-            Icon(Icons.chevron_right,
-                size: 20, color: context.onSurfaceVariant),
+            const SizedBox.shrink(),
           ],
+        ),
         ),
       ),
     );
@@ -289,6 +317,8 @@ class _ChatListViewState extends State<ChatListView>
     return L10n.t('chat_list.logged_as', {'user': handle});
   }
 
+  bool _wide = false;
+
   @override
   Widget build(BuildContext context) {
     final actions = _tabController.index == 0
@@ -297,174 +327,308 @@ class _ChatListViewState extends State<ChatListView>
             ? Icons.group_add
             : null;
 
-    return Scaffold(
-      backgroundColor: context.surfaceContainer,
-      appBar: AppBar(
-        backgroundColor: context.surface,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Chats',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            Text(_loggedAs(),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        _wide = constraints.maxWidth >= 800;
+        if (_wide) {
+          return Scaffold(
+            backgroundColor: context.surface,
+            body: Row(
+              children: [
+                SizedBox(
+                  width: 380,
+                  child: ColoredBox(
+                    color: context.surfaceContainerHigh,
+                    child: SafeArea(
+                      child: Column(
+                        children: [
+                          _sidebarHeader(),
+
+                          _sidebarSearch(),
+                          _sidebarTabs(),
+                          Expanded(
+                            child: TabBarView(
+                              controller: _tabController,
+                              children: [
+                                _tabBody(_personal, 'chat_list.no_personal'),
+                                _tabBody(_groups, 'chat_list.no_groups'),
+                                _tabBody(_public, 'chat_list.no_public'),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                VerticalDivider(
+                    width: 1, color: context.outlineVariant),
+                Expanded(
+                  child: _selectedRoom == null
+                      ? Container(
+                          color: context.surfaceContainer,
+                          child: Center(
+                            child: Text(
+                              'Select a chat to start messaging',
+                              style: TextStyle(
+                                  color: context.onSurfaceVariant),
+                            ),
+                          ),
+                        )
+                      : RoomView(
+                          key: ValueKey(_selectedRoom!.id),
+                          state: widget.state,
+                          room: _selectedRoom!),
+                ),
+              ],
+            ),
+          );
+        }
+        // Narrow / mobile fallback: same layout as before.
+        return Scaffold(
+          backgroundColor: context.surfaceContainer,
+          appBar: AppBar(
+            backgroundColor: context.surface,
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Chats',
+                    style: TextStyle(
+                        fontSize: 22, fontWeight: FontWeight.bold)),
+                Text(_loggedAs(),
+                    style: TextStyle(
+                        fontSize: 12, color: context.onSurfaceVariant)),
+              ],
+            ),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                tooltip: L10n.t('chat_list.refresh'),
+                onPressed: _loadChats,
+              ),
+              IconButton(
+                icon: const Icon(Icons.person),
+                tooltip: L10n.t('chat_list.profile'),
+                onPressed: () {
+                  navigatePush(context, ProfileView(state: widget.state));
+                },
+              ),
+              TextButton(
+                onPressed: _logout,
+                child: Text(L10n.t('chat_list.logout')),
+              ),
+            ],
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(56),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: TextField(
+                  controller: _searchCtrl,
+                  decoration: themedFieldDecoration(
+                    hintText: L10n.t('chat_list.search'),
+                    prefixIcon: Icons.search,
+                  ),
+                  onChanged: (v) {
+                    _searchDebounce?.cancel();
+                    _searchDebounce =
+                        Timer(const Duration(milliseconds: 300), () {
+                      if (mounted) setState(() {});
+                    });
+                  },
+                ),
+              ),
+            ),
+          ),
+          body: TabBarView(
+            controller: _tabController,
+            children: [
+              _tabBody(_personal, 'chat_list.no_personal'),
+              _tabBody(_groups, 'chat_list.no_groups'),
+              _tabBody(_public, 'chat_list.no_public'),
+            ],
+          ),
+          bottomNavigationBar: Material(
+            color: context.surface,
+            child: SafeArea(
+              child: TabBar(
+                controller: _tabController,
+                tabs: [
+                  Tab(
+                    icon: const Icon(Icons.person),
+                    text: L10n.t('chat_list.tab_personal'),
+                  ),
+                  Tab(
+                    icon: const Icon(Icons.group),
+                    text: L10n.t('chat_list.tab_groups'),
+                  ),
+                  Tab(
+                    icon: const Icon(Icons.public),
+                    text: L10n.t('chat_list.tab_public'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          floatingActionButton: actions == null
+              ? null
+              : FloatingActionButton.extended(
+                  onPressed: () => _showCreateDialog(context, actions),
+                  icon: Icon(actions),
+                  label: Text(_tabController.index == 0
+                      ? L10n.t('chat_list.new_chat')
+                      : L10n.t('chat_list.new_group')),
+                ),
+        );
+      },
+    );
+  }
+
+  Widget _sidebarHeader() {
+    final actions = _tabController.index == 0
+        ? Icons.person_add
+        : _tabController.index == 1
+            ? Icons.group_add
+            : null;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.menu),
+            onPressed: () =>
+                navigatePush(context, ProfileView(state: widget.state)),
+          ),
+          Expanded(
+            child: Text(_loggedAs(),
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                     fontSize: 12, color: context.onSurfaceVariant)),
-          ],
-        ),
-        actions: [
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
-            tooltip: L10n.t('chat_list.refresh'),
             onPressed: _loadChats,
           ),
           IconButton(
-            icon: const Icon(Icons.person),
-            tooltip: L10n.t('chat_list.profile'),
-            onPressed: () {
-              navigatePush(context, ProfileView(state: widget.state));
-            },
-          ),
-          TextButton(
+            icon: const Icon(Icons.logout),
             onPressed: _logout,
-            child: Text(L10n.t('chat_list.logout')),
           ),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(56),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: TextField(
-              controller: _searchCtrl,
-              decoration: themedFieldDecoration(
-                hintText: L10n.t('chat_list.search'),
-                prefixIcon: Icons.search,
-              ),
-              onChanged: (v) {
-                _searchDebounce?.cancel();
-                _searchDebounce =
-                    Timer(const Duration(milliseconds: 300), () {
-                  if (mounted) setState(() {});
-                });
-              },
+          if (actions != null)
+            IconButton(
+              icon: Icon(actions),
+              onPressed: () => _showCreateDialog(context, actions),
             ),
-          ),
-        ),
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _tabBody(_personal, 'chat_list.no_personal'),
-          _tabBody(_groups, 'chat_list.no_groups'),
-          _tabBody(_public, 'chat_list.no_public'),
         ],
       ),
-      bottomNavigationBar: Material(
-        color: context.surface,
-        child: SafeArea(
-          child: TabBar(
-            controller: _tabController,
-            tabs: [
-              Tab(
-                icon: const Icon(Icons.person),
-                text: L10n.t('chat_list.tab_personal'),
+    );
+  }
+
+  Widget _sidebarSearch() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: TextField(
+        controller: _searchCtrl,
+        decoration: themedFieldDecoration(
+          hintText: L10n.t('chat_list.search'),
+          prefixIcon: Icons.search,
+        ),
+        onChanged: (v) {
+          _searchDebounce?.cancel();
+          _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+            if (mounted) setState(() {});
+          });
+        },
+      ),
+    );
+  }
+
+  Widget _sidebarTabs() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: TabBar(
+        controller: _tabController,
+        dividerColor: Colors.transparent,
+        labelColor: context.primary,
+        unselectedLabelColor: context.onSurfaceVariant,
+        tabs: [
+          Tab(text: L10n.t('chat_list.tab_personal')),
+          Tab(text: L10n.t('chat_list.tab_groups')),
+          Tab(text: L10n.t('chat_list.tab_public')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showCreateDialog(BuildContext context, IconData actions) async {
+    if (_tabController.index == 0) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(L10n.t('chat_list.new_personal_chat')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _usernameCtrl,
+                autofocus: true,
+                decoration: themedFieldDecoration(
+                    label: L10n.t('chat_list.username_field')),
               ),
-              Tab(
-                icon: const Icon(Icons.group),
-                text: L10n.t('chat_list.tab_groups'),
+              if (_personalError != null)
+                Text(_personalError!,
+                    style: TextStyle(color: context.error, fontSize: 12)),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text(L10n.t('chat_list.cancel')),
+            ),
+            FilledButton(
+              onPressed: _createPersonalChat,
+              child: Text(L10n.t('chat_list.create')),
+            ),
+          ],
+        ),
+      );
+    } else if (_tabController.index == 1) {
+      showDialog(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setDialogState) => AlertDialog(
+            title: Text(L10n.t('chat_list.new_group_chat')),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: _groupNameCtrl,
+                  autofocus: true,
+                  decoration: themedFieldDecoration(
+                      label: L10n.t('chat_list.group_name_field')),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(L10n.t('chat_list.public_group')),
+                  value: _publicGroup,
+                  onChanged: (v) => setDialogState(() => _publicGroup = v),
+                ),
+                if (_groupError != null)
+                  Text(_groupError!,
+                      style: TextStyle(color: context.error, fontSize: 12)),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: Text(L10n.t('chat_list.cancel')),
               ),
-              Tab(
-                icon: const Icon(Icons.public),
-                text: L10n.t('chat_list.tab_public'),
+              FilledButton(
+                onPressed: _createGroupChat,
+                child: Text(L10n.t('chat_list.create')),
               ),
             ],
           ),
         ),
-      ),
-      floatingActionButton: actions == null
-          ? null
-          : FloatingActionButton.extended(
-              onPressed: () {
-                if (_tabController.index == 0) {
-                  showDialog(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: Text(L10n.t('chat_list.new_personal_chat')),
-                      content: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          TextField(
-                            controller: _usernameCtrl,
-                            autofocus: true,
-                            decoration: themedFieldDecoration(
-                                label: L10n.t('chat_list.username_field')),
-                          ),
-                          if (_personalError != null)
-                            Text(_personalError!,
-                                style: TextStyle(
-                                    color: context.error, fontSize: 12)),
-                        ],
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.of(ctx).pop(),
-                          child: Text(L10n.t('chat_list.cancel')),
-                        ),
-                        FilledButton(
-                          onPressed: _createPersonalChat,
-                          child: Text(L10n.t('chat_list.create')),
-                        ),
-                      ],
-                    ),
-                  );
-                } else if (_tabController.index == 1) {
-                  showDialog(
-                    context: context,
-                    builder: (ctx) => StatefulBuilder(
-                      builder: (ctx, setDialogState) => AlertDialog(
-                        title: Text(L10n.t('chat_list.new_group_chat')),
-                        content: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            TextField(
-                              controller: _groupNameCtrl,
-                              autofocus: true,
-                              decoration: themedFieldDecoration(
-                                  label:
-                                      L10n.t('chat_list.group_name_field')),
-                            ),
-                            SwitchListTile(
-                              contentPadding: EdgeInsets.zero,
-                              title: Text(L10n.t('chat_list.public_group')),
-                              value: _publicGroup,
-                              onChanged: (v) =>
-                                  setDialogState(() => _publicGroup = v),
-                            ),
-                            if (_groupError != null)
-                              Text(_groupError!,
-                                  style: TextStyle(
-                                      color: context.error, fontSize: 12)),
-                          ],
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.of(ctx).pop(),
-                            child: Text(L10n.t('chat_list.cancel')),
-                          ),
-                          FilledButton(
-                            onPressed: _createGroupChat,
-                            child: Text(L10n.t('chat_list.create')),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }
-              },
-              icon: Icon(actions),
-              label: Text(_tabController.index == 0
-                  ? L10n.t('chat_list.new_chat')
-                  : L10n.t('chat_list.new_group')),
-            ),
-    );
+      );
+    }
   }
 }

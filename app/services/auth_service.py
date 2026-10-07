@@ -66,6 +66,13 @@ async def register_user(
         raise HTTPException(status_code=409, detail="Email already exists")
 
     hashed_password = _hash_password(password)
+    # The very first local account on a fresh server becomes its admin.
+    from sqlalchemy import func as _func
+
+    count_result = await db.execute(
+        select(_func.count()).select_from(User).where(User.is_remote == False)  # noqa: E712
+    )
+    first_user = count_result.scalar_one() == 0
     user = User(
         username=username,
         email=email,
@@ -73,6 +80,7 @@ async def register_user(
         identity_pub_ed25519=identity_pub_ed25519,
         identity_pub_x25519=identity_pub_x25519,
         encrypted_backup=encrypted_backup,
+        is_admin=first_user,
     )
     db.add(user)
     await db.commit()

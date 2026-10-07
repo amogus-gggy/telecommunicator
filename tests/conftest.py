@@ -1,6 +1,7 @@
 import os
 
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production")
+os.environ.setdefault("POW_REQUIRED", "false")
 
 import pytest
 from collections.abc import AsyncGenerator
@@ -13,6 +14,7 @@ from httpx import AsyncClient, ASGITransport
 
 from app.db.base import Base
 from app.db.deps import get_db
+from app.routers import admin as admin_router
 from app.routers import auth as auth_router
 from app.routers import backup as backup_router
 from app.routers import federation as federation_router
@@ -74,6 +76,7 @@ async def client(test_db: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     test_app.state.limiter = limiter
     test_app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     test_app.include_router(auth_router.router)
+    test_app.include_router(admin_router.router)
     test_app.include_router(rooms_router.router)
     test_app.include_router(messages_router.router)
     test_app.include_router(users_router.router)

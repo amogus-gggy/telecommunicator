@@ -38,6 +38,7 @@ app = FastAPI(title="Telecommunicator", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+from app.routers import admin as admin_router  # noqa: E402
 from app.routers import auth as auth_router  # noqa: E402
 from app.routers import backup as backup_router  # noqa: E402
 from app.routers import federation as federation_router  # noqa: E402
@@ -55,3 +56,4 @@ app.include_router(ws_router.router)
 app.include_router(backup_router.router)
 app.include_router(federation_router.router)
 app.include_router(sender_keys_router.router)
+app.include_router(admin_router.router)

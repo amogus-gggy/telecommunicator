@@ -166,3 +166,49 @@ async def test_protected_endpoint_expired_token(client: AsyncClient):
         "/auth/me", headers={"Authorization": f"Bearer {expired_token}"}
     )
     assert response.status_code == 401
+
+
+async def test_pow_challenge_and_verify():
+    """Issue a challenge, solve it, and confirm verify_pow accepts it once."""
+    import hashlib
+
+    from app.services import pow as pow_service
+
+    old_required, old_diff = pow_service.POW_REQUIRED, pow_service.POW_DIFFICULTY
+    pow_service.POW_REQUIRED = True
+    pow_service.POW_DIFFICULTY = 2
+    try:
+        ch = pow_service.issue_challenge()
+        assert ch["difficulty"] == 2
+        nonce = 0
+        while True:
+            digest = hashlib.sha256(
+                f"{ch['challenge']}:{nonce}".encode()
+            ).hexdigest()
+            if digest.startswith("00"):
+                break
+            nonce += 1
+        assert pow_service.verify_pow(ch["challenge"], str(nonce)) is True
+        # single use
+        assert pow_service.verify_pow(ch["challenge"], str(nonce)) is False
+        assert pow_service.verify_pow("bogus", "0") is False
+    finally:
+        pow_service.POW_REQUIRED, pow_service.POW_DIFFICULTY = (
+            old_required,
+            old_diff,
+        )
+
+
+async def test_register_rejected_without_pow(client: AsyncClient):
+    """When PoW is required, registration without a valid solution is 403."""
+    from app.services import pow as pow_service
+
+    old_required = pow_service.POW_REQUIRED
+    pow_service.POW_REQUIRED = True
+    try:
+        response = await client.post(
+            "/auth/register", json=_reg_payload("mallory", "m@example.com")
+        )
+        assert response.status_code == 403
+    finally:
+        pow_service.POW_REQUIRED = old_required

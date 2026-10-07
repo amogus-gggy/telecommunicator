@@ -131,6 +131,8 @@ class ApiClient {
     required String identityPubEd25519,
     required String identityPubX25519,
     required String encryptedBackup,
+    String? powChallenge,
+    String? powNonce,
   }) async {
     final r = await _post('/auth/register', json: {
       'username': username,
@@ -139,14 +141,50 @@ class ApiClient {
       'identity_pub_ed25519': identityPubEd25519,
       'identity_pub_x25519': identityPubX25519,
       'encrypted_backup': encryptedBackup,
+      if (powChallenge != null) 'pow_challenge': powChallenge,
+      if (powNonce != null) 'pow_nonce': powNonce,
     });
     return jsonDecode(r.body) as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> login(String username, String password) async {
-    final r = await _post('/auth/login',
-        json: {'username': username, 'password': password});
+  Future<Map<String, dynamic>> getPowChallenge() async {
+    final r = await _get('/auth/pow/challenge');
     return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> login(String username, String password,
+      {String? powChallenge, String? powNonce}) async {
+    final r = await _post('/auth/login', json: {
+      'username': username,
+      'password': password,
+      if (powChallenge != null) 'pow_challenge': powChallenge,
+      if (powNonce != null) 'pow_nonce': powNonce,
+    });
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
+  // ---- Admin ----
+  Future<Map<String, dynamic>> adminStats() async {
+    final r = await _get('/admin/stats');
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
+  Future<List<dynamic>> adminUsers() async {
+    final r = await _get('/admin/users');
+    return jsonDecode(r.body) as List<dynamic>;
+  }
+
+  Future<void> adminSetAdmin(int userId, bool isAdmin) async {
+    await _patch('/admin/users/$userId/admin', json: {'is_admin': isAdmin});
+  }
+
+  Future<void> adminDeleteUser(int userId) async {
+    await _delete('/admin/users/$userId');
+  }
+
+  Future<List<dynamic>> adminRooms() async {
+    final r = await _get('/admin/rooms');
+    return jsonDecode(r.body) as List<dynamic>;
   }
 
   // ---- Users ----

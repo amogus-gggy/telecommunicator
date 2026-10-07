@@ -18,8 +18,15 @@ from app.services.auth_service import (
     register_user,
 )
 from app.services.rate_limit import limiter
+from app.services import pow as pow_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.get("/pow/challenge")
+@limiter.limit("30/15minutes")
+async def get_pow_challenge(request: Request):
+    return pow_service.issue_challenge()
 
 
 @router.post(
@@ -39,6 +46,9 @@ async def register(
         raise HTTPException(
             status_code=400, detail="Invalid base64 encoding in key fields"
         )
+
+    if not pow_service.verify_pow(body.pow_challenge, body.pow_nonce):
+        raise HTTPException(status_code=403, detail="PoW check failed")
 
     user = await register_user(
         db,
@@ -62,6 +72,9 @@ async def login(
     body: LoginRequest,
     db: AsyncSession = Depends(get_db),
 ):
+    if not pow_service.verify_pow(body.pow_challenge, body.pow_nonce):
+        raise HTTPException(status_code=403, detail="PoW check failed")
+
     user = await authenticate_user(db, body.username, body.password)
     token = create_access_token(user.id, user.username)
     b64_backup = (

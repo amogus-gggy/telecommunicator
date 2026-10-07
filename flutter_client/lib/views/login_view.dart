@@ -5,11 +5,13 @@ import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../config.dart';
 import '../crypto/key_backup.dart';
+import '../crypto/pow.dart';
 import '../crypto/keys.dart';
 import '../l10n/strings.dart';
 import '../state/app_state.dart';
 import '../ui/theme.dart';
 import 'chat_list_view.dart';
+import 'deploy_view.dart';
 import 'register_view.dart';
 
 class LoginView extends StatefulWidget {
@@ -71,7 +73,9 @@ class _LoginViewState extends State<LoginView> {
 
     final client = ApiClient(state: state);
     try {
-      final tokenData = await client.login(username, _passwordCtrl.text);
+      final pow = await obtainPow(client);
+      final tokenData = await client.login(username, _passwordCtrl.text,
+          powChallenge: pow?.$1, powNonce: pow?.$2);
       state.token = tokenData['access_token'] as String;
 
       final backupB64 = tokenData['encrypted_backup'] as String?;
@@ -220,6 +224,12 @@ class _LoginViewState extends State<LoginView> {
                   },
                   child: Text(L10n.t('login.no_account'),
                       style: TextStyle(color: context.primary)),
+                ),
+                TextButton(
+                  onPressed: () => navigatePush(
+                      context, DeployView(state: widget.state)),
+                  child: Text('Deploy server to my VPS',
+                      style: TextStyle(color: context.onSurfaceVariant)),
                 ),
               ],
             ),
