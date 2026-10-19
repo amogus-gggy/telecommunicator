@@ -1,6 +1,6 @@
 # 📬 Telecommunicator
 
-> A self-hosted messenger with end-to-end encryption (E2EE) for messages and files. Built with FastAPI backend and Flet-based client for cross-platform support (mobile & desktop).
+> A self-hosted messenger with end-to-end encryption (E2EE) for messages and files. Built with FastAPI backend and Flutter-based client for cross-platform support (mobile & desktop).
 
 [![License](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-green)](https://www.python.org/downloads/)
@@ -13,8 +13,7 @@
 | Feature | Description                                                                                                  |
 |---------|--------------------------------------------------------------------------------------------------------------|
 | 🔒 **End-to-End Encryption** | Messages encrypted using modified Signal protocols|
-| 🏠 **Self-Hosted** | Full control over your data with Docker deployment                                                           |
-| 📱 **Cross-Platform Client** | Available for mobile (Android/iOS) and desktop via Flet                                                      |
+| 🏠 **Self-Hosted** | Full control over your data with Docker deployment                                                           |                                                     |
 | 🌐 **Federation Support** | Multi-server federation capabilities(like matrix)                                                            |
 | 💾 **Encrypted Storage** | Local message store encrypted at rest using AES-256-GCM                                                      |
 | 🔑 **Key Backup** | Secure identity key backup and recovery from server                                                          |
@@ -37,16 +36,6 @@
 | Rate Limiting | SlowAPI for request throttling |
 | Federation | Cross-server communication support |
 
-### Client (`/client`)
-
-| Component | Technology |
-|-----------|------------|
-| Framework | Flet (Python-based Flutter wrapper) |
-| Crypto | X25519 key exchange, Double Ratchet protocol |
-| Storage | Encrypted local storage for sessions and messages |
-| UI Components | Login, registration, chat list, room view, profile, settings |
-
----
 
 ## 🛠️ Quick Start
 
@@ -126,15 +115,6 @@ telecommunicator/
 | cryptography | latest | E2EE primitives |
 | passlib | latest | Password hashing |
 
-### Client
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| Flet | 0.84.0 | UI Framework |
-| httpx | latest | HTTP client |
-| websockets | latest | WebSocket support |
-| cryptography | latest | E2EE implementation |
-| python-i18n | latest | Internationalization |
 
 ---
 
@@ -184,7 +164,7 @@ docker compose -f docker-compose.federation.yml up -d
 #### Group E2EE - implemented fully
 
 #### Flutter Client Rewrite
-- [ ] Migrate from Flet to native Flutter
+- [+] Migrate from Flet to native Flutter
 Benefits: Better performance, native feel, broader platform support
 - [ ] Improved battery efficiency and resource usage
 
